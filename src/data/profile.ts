@@ -2,9 +2,9 @@ import { UserProfile } from '../types';
 
 export const userProfile: UserProfile = {
   name: 'Jean Silva',
-  phone: '(16) 99999-9999',
+  phone: '(16) 99761-0293',
   email: 'jeandasilvasantos2015@gmail.com',
-  linkedin: 'linkedin.com/in/jean-silva-cs',
+  linkedin: 'https://www.linkedin.com/in/jeansilvasantos/',
   location: 'São Paulo, SP - Brasil',
   targetTitles: [
     'Customer Success Analyst',

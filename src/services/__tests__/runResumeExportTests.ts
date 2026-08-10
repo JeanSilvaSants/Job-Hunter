@@ -90,9 +90,9 @@ export async function runResumeExportTests() {
   const mockResume: FullResumeData = {
     name: 'JEAN SILVA',
     headline: 'Especialista em Customer Success & Atendimento ao Cliente B2B/B2C',
-    phone: '(16) 99999-9999',
+    phone: '(16) 99761-0293',
     email: 'jean@example.com',
-    linkedin: 'linkedin.com/in/jean-silva',
+    linkedin: 'https://www.linkedin.com/in/jeansilvasantos/',
     location: 'São Paulo, SP - Brasil',
     professionalSummary:
       'Profissional focado em experiência do cliente, retenção, onboarding e suporte de alta qualidade.',
