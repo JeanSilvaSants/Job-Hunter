@@ -6,11 +6,18 @@ import {
   generateExternalKey,
   getAuthenticatedUserId,
   initSupabase,
+  configDetails,
 } from './supabase';
 import { Job, JobWithAnalysis, ApplicationStatus } from '../types';
 import { TailoredResume } from './resume';
 
 export interface CloudSyncDiagnostics {
+  apiConfigStatus: string;
+  configJsonValid: boolean;
+  urlReceivedFromBackend: boolean;
+  publishableKeyReceivedFromBackend: boolean;
+  createClientExecuted: boolean;
+  supabaseSessionActive: boolean;
   hasUrl: boolean;
   hasPublishableKey: boolean;
   clientInitialized: boolean;
@@ -484,7 +491,7 @@ export async function migrateLocalDataToSupabase(
  * Diagnostics stats for UI panel.
  */
 export async function getCloudSyncDiagnostics(): Promise<CloudSyncDiagnostics> {
-  await initSupabase();
+  await initSupabase(true);
   const configured = isSupabaseConfigured;
   let authenticated = false;
   let userEmail: string | null = null;
@@ -520,6 +527,12 @@ export async function getCloudSyncDiagnostics(): Promise<CloudSyncDiagnostics> {
   }
 
   return {
+    apiConfigStatus: configDetails.apiConfigHttpStatus,
+    configJsonValid: configDetails.configJsonValid,
+    urlReceivedFromBackend: configDetails.urlReceivedFromBackend,
+    publishableKeyReceivedFromBackend: configDetails.publishableKeyReceivedFromBackend,
+    createClientExecuted: configDetails.createClientExecuted,
+    supabaseSessionActive: authenticated,
     hasUrl: hasSupabaseUrl,
     hasPublishableKey: hasPublishableKey,
     clientInitialized: Boolean(supabaseClient !== null),

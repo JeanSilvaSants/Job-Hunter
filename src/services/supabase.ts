@@ -20,6 +20,24 @@ function getEnvVar(primaryKey: string, fallbackKey?: string): string | undefined
   return undefined;
 }
 
+export interface SupabaseConfigDetails {
+  apiConfigHttpStatus: string;
+  configJsonValid: boolean;
+  urlReceivedFromBackend: boolean;
+  publishableKeyReceivedFromBackend: boolean;
+  createClientExecuted: boolean;
+  supabaseSessionActive: boolean;
+}
+
+export const configDetails: SupabaseConfigDetails = {
+  apiConfigHttpStatus: 'Pendente',
+  configJsonValid: false,
+  urlReceivedFromBackend: false,
+  publishableKeyReceivedFromBackend: false,
+  createClientExecuted: false,
+  supabaseSessionActive: false,
+};
+
 export let hasSupabaseUrl = false;
 export let hasPublishableKey = false;
 export let isSupabaseConfigured = false;
@@ -27,30 +45,50 @@ export let supabaseClient: SupabaseClient | null = null;
 
 let initPromise: Promise<boolean> | null = null;
 
-export function initSupabase(): Promise<boolean> {
-  if (initPromise) {
+export function initSupabase(force = false): Promise<boolean> {
+  if (initPromise && !force && isSupabaseConfigured) {
     return initPromise;
+  }
+
+  if (force || !isSupabaseConfigured) {
+    initPromise = null;
   }
 
   initPromise = (async () => {
     let url = getEnvVar('VITE_SUPABASE_URL');
     let key = getEnvVar('VITE_SUPABASE_PUBLISHABLE_KEY', 'VITE_SUPABASE_ANON_KEY');
 
-    // If static env didn't supply credentials and we are in a browser, fetch from /api/config
-    if ((!url || !key) && typeof window !== 'undefined' && typeof fetch !== 'undefined') {
+    if (url && key) {
+      configDetails.apiConfigHttpStatus = '200 (Env estático)';
+      configDetails.configJsonValid = true;
+      configDetails.urlReceivedFromBackend = true;
+      configDetails.publishableKeyReceivedFromBackend = true;
+    } else if (typeof window !== 'undefined' && typeof fetch !== 'undefined') {
       try {
-        const res = await fetch('/api/config');
+        const res = await fetch('/api/config', { cache: 'no-store' });
+        configDetails.apiConfigHttpStatus = String(res.status);
         if (res.ok) {
-          const config = await res.json();
-          if (config.supabaseUrl && config.supabaseUrl.trim().length > 0) {
-            url = config.supabaseUrl.trim();
-          }
-          if (config.supabasePublishableKey && config.supabasePublishableKey.trim().length > 0) {
-            key = config.supabasePublishableKey.trim();
+          try {
+            const config = await res.json();
+            configDetails.configJsonValid = Boolean(config && typeof config === 'object');
+            if (config && config.supabaseUrl && typeof config.supabaseUrl === 'string' && config.supabaseUrl.trim().length > 0) {
+              url = config.supabaseUrl.trim();
+              configDetails.urlReceivedFromBackend = true;
+            } else {
+              configDetails.urlReceivedFromBackend = false;
+            }
+            if (config && config.supabasePublishableKey && typeof config.supabasePublishableKey === 'string' && config.supabasePublishableKey.trim().length > 0) {
+              key = config.supabasePublishableKey.trim();
+              configDetails.publishableKeyReceivedFromBackend = true;
+            } else {
+              configDetails.publishableKeyReceivedFromBackend = false;
+            }
+          } catch {
+            configDetails.configJsonValid = false;
           }
         }
       } catch (err) {
-        console.warn('[Supabase] Erro ao buscar /api/config:', err);
+        configDetails.apiConfigHttpStatus = 'Erro de Rede';
       }
     }
 
@@ -67,12 +105,18 @@ export function initSupabase(): Promise<boolean> {
               autoRefreshToken: true,
             },
           });
+          configDetails.createClientExecuted = true;
         } catch (err) {
           console.warn('[Supabase] Erro ao inicializar cliente Supabase:', err);
           supabaseClient = null;
           isSupabaseConfigured = false;
+          configDetails.createClientExecuted = false;
         }
+      } else {
+        configDetails.createClientExecuted = true;
       }
+    } else {
+      configDetails.createClientExecuted = false;
     }
 
     return isSupabaseConfigured;

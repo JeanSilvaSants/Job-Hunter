@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Loader2, ShieldCheck } from 'lucide-react';
 import { supabaseClient, isSupabaseConfigured, initSupabase } from '../services/supabase';
 import { LoginScreen } from './LoginScreen';
+import { ResetPasswordScreen } from './ResetPasswordScreen';
 
 type AuthState = 'CHECKING_SESSION' | 'AUTHENTICATED' | 'UNAUTHENTICATED';
 
@@ -12,12 +13,22 @@ interface AuthGuardProps {
 export const AuthGuard: React.FC<AuthGuardProps> = ({ children }) => {
   const [authState, setAuthState] = useState<AuthState>('CHECKING_SESSION');
 
+  const isResetPasswordRoute =
+    typeof window !== 'undefined' &&
+    (window.location.pathname === '/reset-password' ||
+      window.location.pathname.startsWith('/reset-password'));
+
   useEffect(() => {
     let mounted = true;
     let subscription: { unsubscribe: () => void } | null = null;
 
     initSupabase().then(() => {
       if (!mounted) return;
+
+      if (isResetPasswordRoute) {
+        setAuthState('AUTHENTICATED');
+        return;
+      }
 
       if (!isSupabaseConfigured || !supabaseClient) {
         setAuthState('AUTHENTICATED');
@@ -51,7 +62,11 @@ export const AuthGuard: React.FC<AuthGuardProps> = ({ children }) => {
         subscription.unsubscribe();
       }
     };
-  }, []);
+  }, [isResetPasswordRoute]);
+
+  if (isResetPasswordRoute) {
+    return <ResetPasswordScreen />;
+  }
 
   if (authState === 'CHECKING_SESSION') {
     return (
@@ -76,3 +91,4 @@ export const AuthGuard: React.FC<AuthGuardProps> = ({ children }) => {
 
   return <>{children}</>;
 };
+

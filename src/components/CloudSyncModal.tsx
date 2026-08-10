@@ -49,6 +49,12 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
   onDataRestored,
 }) => {
   const [diag, setDiag] = useState<CloudSyncDiagnostics>({
+    apiConfigStatus: 'Pendente',
+    configJsonValid: false,
+    urlReceivedFromBackend: false,
+    publishableKeyReceivedFromBackend: false,
+    createClientExecuted: false,
+    supabaseSessionActive: false,
     hasUrl: hasSupabaseUrl,
     hasPublishableKey: hasPublishableKey,
     clientInitialized: Boolean(supabaseClient !== null),
@@ -269,6 +275,30 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
               <div className="flex items-center justify-between p-2 bg-white rounded border border-slate-200">
+                <span className="text-slate-600 font-medium">/api/config HTTP:</span>
+                <span className={`font-black px-2 py-0.5 rounded text-[10px] ${diag.apiConfigStatus === '200' || diag.apiConfigStatus?.includes('200') ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'}`}>
+                  {diag.apiConfigStatus || 'Pendente'}
+                </span>
+              </div>
+              <div className="flex items-center justify-between p-2 bg-white rounded border border-slate-200">
+                <span className="text-slate-600 font-medium">Config JSON válido:</span>
+                <span className={`font-black px-2 py-0.5 rounded text-[10px] ${diag.configJsonValid ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'}`}>
+                  {diag.configJsonValid ? 'SIM' : 'NÃO'}
+                </span>
+              </div>
+              <div className="flex items-center justify-between p-2 bg-white rounded border border-slate-200">
+                <span className="text-slate-600 font-medium">URL recebida do backend:</span>
+                <span className={`font-black px-2 py-0.5 rounded text-[10px] ${diag.urlReceivedFromBackend ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'}`}>
+                  {diag.urlReceivedFromBackend ? 'SIM' : 'NÃO'}
+                </span>
+              </div>
+              <div className="flex items-center justify-between p-2 bg-white rounded border border-slate-200">
+                <span className="text-slate-600 font-medium">Publishable Key do backend:</span>
+                <span className={`font-black px-2 py-0.5 rounded text-[10px] ${diag.publishableKeyReceivedFromBackend ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'}`}>
+                  {diag.publishableKeyReceivedFromBackend ? 'SIM' : 'NÃO'}
+                </span>
+              </div>
+              <div className="flex items-center justify-between p-2 bg-white rounded border border-slate-200">
                 <span className="text-slate-600 font-medium">Supabase URL detectada:</span>
                 <span className={`font-black px-2 py-0.5 rounded text-[10px] ${diag.hasUrl ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'}`}>
                   {diag.hasUrl ? 'SIM' : 'NÃO'}
@@ -281,15 +311,21 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
                 </span>
               </div>
               <div className="flex items-center justify-between p-2 bg-white rounded border border-slate-200">
+                <span className="text-slate-600 font-medium">createClient() executado:</span>
+                <span className={`font-black px-2 py-0.5 rounded text-[10px] ${diag.createClientExecuted ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'}`}>
+                  {diag.createClientExecuted ? 'SIM' : 'NÃO'}
+                </span>
+              </div>
+              <div className="flex items-center justify-between p-2 bg-white rounded border border-slate-200">
                 <span className="text-slate-600 font-medium">Cliente Supabase inicializado:</span>
                 <span className={`font-black px-2 py-0.5 rounded text-[10px] ${diag.clientInitialized ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'}`}>
                   {diag.clientInitialized ? 'SIM' : 'NÃO'}
                 </span>
               </div>
-              <div className="flex items-center justify-between p-2 bg-white rounded border border-slate-200">
-                <span className="text-slate-600 font-medium">Sessão autenticada:</span>
-                <span className={`font-black px-2 py-0.5 rounded text-[10px] ${diag.authenticated ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'}`}>
-                  {diag.authenticated ? 'SIM' : 'NÃO'}
+              <div className="flex items-center justify-between p-2 bg-white rounded border border-slate-200 sm:col-span-2">
+                <span className="text-slate-600 font-medium">Sessão Supabase / Autenticada:</span>
+                <span className={`font-black px-2 py-0.5 rounded text-[10px] ${diag.authenticated ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-800'}`}>
+                  {diag.authenticated ? 'AUTENTICADO (SIM)' : 'SESSÃO ANÔNIMA / PENDENTE (NÃO)'}
                 </span>
               </div>
             </div>
