@@ -128,33 +128,75 @@ export function initSupabase(force = false): Promise<boolean> {
 // Trigger initial resolution immediately on module load
 initSupabase();
 
+export function clearSupabaseLocalStorage(): void {
+  if (typeof window === 'undefined') return;
+
+  const clearStorage = (storage: Storage) => {
+    try {
+      const keysToRemove: string[] = [];
+      for (let i = 0; i < storage.length; i++) {
+        const key = storage.key(i);
+        if (key) {
+          const lower = key.toLowerCase();
+          if (
+            lower.startsWith('sb-') ||
+            lower.includes('supabase') ||
+            lower.includes('auth-token') ||
+            lower.includes('authtoken')
+          ) {
+            keysToRemove.push(key);
+          }
+        }
+      }
+      keysToRemove.forEach((k) => {
+        try {
+          storage.removeItem(k);
+        } catch {
+          // ignore
+        }
+      });
+    } catch (e) {
+      console.warn('[Supabase] Error clearing storage:', e);
+    }
+  };
+
+  if (window.localStorage) clearStorage(window.localStorage);
+  if (window.sessionStorage) clearStorage(window.sessionStorage);
+}
+
 /**
  * Realiza o encerramento da sessão no Supabase, limpa os tokens de autenticação locais
  * e recarrega a página para retornar imediatamente à tela de login.
  */
 export async function signOutUser(): Promise<void> {
   await initSupabase();
+
   if (supabaseClient) {
     try {
-      await supabaseClient.auth.signOut();
-    } catch {
-      try {
-        await supabaseClient.auth.signOut({ scope: 'local' });
-      } catch (err) {
-        console.warn('[Supabase] Erro ao encerrar sessão local:', err);
-      }
+      // Race remote signOut with 800ms timeout
+      await Promise.race([
+        supabaseClient.auth.signOut(),
+        new Promise((resolve) => setTimeout(resolve, 800)),
+      ]);
+    } catch (err) {
+      console.warn('[Supabase] Remote signOut error:', err);
+    }
+
+    try {
+      await supabaseClient.auth.signOut({ scope: 'local' });
+    } catch (err) {
+      console.warn('[Supabase] Local signOut error:', err);
     }
   }
 
   // Remapeia e limpa especificamente tokens de auth do Supabase do localStorage sem apagar os dados da app
-  if (typeof window !== 'undefined' && window.localStorage) {
-    for (let i = localStorage.length - 1; i >= 0; i--) {
-      const key = localStorage.key(i);
-      if (key && (key.startsWith('sb-') || key.includes('supabase.auth.token'))) {
-        localStorage.removeItem(key);
-      }
-    }
+  clearSupabaseLocalStorage();
+
+  if (typeof window !== 'undefined') {
     window.location.href = window.location.origin;
+    setTimeout(() => {
+      window.location.reload();
+    }, 100);
   }
 }
 
