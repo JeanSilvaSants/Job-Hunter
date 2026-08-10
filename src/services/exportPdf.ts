@@ -1,10 +1,62 @@
 import { jsPDF } from 'jspdf';
-import { saveAs } from 'file-saver';
+import saveAs from 'file-saver';
 import { FullResumeData } from './fullResume';
 import { sanitizeFilename } from './exportDocx';
 
 /**
- * Generates an ATS-friendly .pdf document with vector text.
+ * Formats a date range string into a compact month format.
+ * Example: "Setembro de 2022 – Novembro de 2023" -> "Set 2022 – Nov 2023"
+ */
+export function formatCompactPeriod(period: string): string {
+  if (!period) return '';
+
+  const monthMap: Record<string, string> = {
+    janeiro: 'Jan',
+    fevereiro: 'Fev',
+    março: 'Mar',
+    marco: 'Mar',
+    abril: 'Abr',
+    maio: 'Mai',
+    junho: 'Jun',
+    julho: 'Jul',
+    agosto: 'Ago',
+    setembro: 'Set',
+    outubro: 'Out',
+    novembro: 'Nov',
+    dezembro: 'Dez',
+    january: 'Jan',
+    february: 'Feb',
+    march: 'Mar',
+    april: 'Apr',
+    may: 'May',
+    june: 'Jun',
+    july: 'Jul',
+    august: 'Aug',
+    september: 'Sep',
+    october: 'Oct',
+    november: 'Nov',
+    december: 'Dec',
+  };
+
+  let formatted = period;
+
+  // Remove " de " between month word and 4-digit year (e.g. "Setembro de 2022" -> "Setembro 2022")
+  formatted = formatted.replace(/([a-zA-ZçÇáéíóúÁÉÍÓÚ]+)\s+de\s+(\d{4})/gi, '$1 $2');
+
+  // Abbreviate month names to 3 letters
+  Object.entries(monthMap).forEach(([full, abbr]) => {
+    const regex = new RegExp(`\\b${full}\\b`, 'gi');
+    formatted = formatted.replace(regex, abbr);
+  });
+
+  // Normalize hyphen / dash separators
+  formatted = formatted.replace(/\s*–\s*/g, ' – ').replace(/\s*-\s*/g, ' – ');
+
+  return formatted.trim();
+}
+
+/**
+ * Generates an ATS-friendly .pdf document with vector text and precise line wrapping.
  */
 export async function generatePdfBlob(resume: FullResumeData): Promise<Blob> {
   const doc = new jsPDF({
@@ -17,7 +69,7 @@ export async function generatePdfBlob(resume: FullResumeData): Promise<Blob> {
   const marginTop = 18;
   const marginBottom = 18;
   const marginLeft = 18;
-  const contentWidth = 174; // 210 - 36
+  const contentWidth = 174; // 210 - 36 (margins)
   let y = marginTop;
 
   function checkPageBreak(neededHeight: number) {
@@ -28,12 +80,12 @@ export async function generatePdfBlob(resume: FullResumeData): Promise<Blob> {
   }
 
   function addSectionHeading(title: string) {
-    checkPageBreak(12);
+    checkPageBreak(14);
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(11);
     doc.setTextColor(30, 41, 59); // Slate-800
     doc.text(title.toUpperCase(), marginLeft, y);
-    y += 2;
+    y += 2.5;
 
     // Subtle line divider
     doc.setDrawColor(226, 232, 240); // Slate-200
@@ -102,40 +154,91 @@ export async function generatePdfBlob(resume: FullResumeData): Promise<Blob> {
   addSectionHeading('Experiência Profissional');
 
   resume.experiences.forEach((exp) => {
-    checkPageBreak(8);
+    // Check space for Company name + first role header + at least 1 bullet
+    checkPageBreak(18);
+
+    // Company Name
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(10);
-    doc.setTextColor(15, 23, 42);
-    doc.text(exp.company.toUpperCase(), marginLeft, y);
-    y += 4.5;
+    doc.setFontSize(10.5);
+    doc.setTextColor(15, 23, 42); // Slate-900
+    const companyLines = doc.splitTextToSize(exp.company.toUpperCase(), contentWidth);
+    doc.text(companyLines, marginLeft, y);
+    y += companyLines.length * 4.5 + 1.5;
 
     exp.roles.forEach((role) => {
-      checkPageBreak(6);
+      const formattedPeriod = formatCompactPeriod(role.period);
+
+      // Measure width of role title and date
       doc.setFont('helvetica', 'bold');
-      doc.setFontSize(9);
-      doc.setTextColor(30, 41, 59);
-      doc.text(role.title, marginLeft, y);
+      doc.setFontSize(9.5);
+      const titleWidth = doc.getTextWidth(role.title);
 
       doc.setFont('helvetica', 'normal');
       doc.setFontSize(8.5);
-      doc.setTextColor(100, 116, 139);
-      const periodWidth = doc.getTextWidth(` (${role.period})`);
-      doc.text(` (${role.period})`, marginLeft + doc.getTextWidth(role.title), y);
-      y += 4;
+      const dateWidth = doc.getTextWidth(formattedPeriod);
 
-      doc.setTextColor(51, 65, 85);
+      const minimumGap = 8; // 8mm gap required between title and date
+      const fitsOnOneLine = titleWidth + dateWidth + minimumGap <= contentWidth;
+
+      if (fitsOnOneLine) {
+        checkPageBreak(12); // Title line + bullet minimum space
+
+        // Title at Left
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(9.5);
+        doc.setTextColor(30, 41, 59); // Slate-800
+        doc.text(role.title, marginLeft, y);
+
+        // Date right-aligned at content edge
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(8.5);
+        doc.setTextColor(100, 116, 139); // Slate-500
+        doc.text(formattedPeriod, marginLeft + contentWidth, y, { align: 'right' });
+
+        y += 4.5;
+      } else {
+        // Multi-line header (Role title on top, Date on next line)
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(9.5);
+        const titleLines = doc.splitTextToSize(role.title, contentWidth);
+
+        const neededHeaderHeight = titleLines.length * 4.5 + 4.5;
+        checkPageBreak(neededHeaderHeight + 8);
+
+        doc.setTextColor(30, 41, 59);
+        doc.text(titleLines, marginLeft, y);
+        y += titleLines.length * 4.5;
+
+        // Date rendered on next line, right-aligned to maintain alignment
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(8.5);
+        doc.setTextColor(100, 116, 139);
+        doc.text(formattedPeriod, marginLeft + contentWidth, y, { align: 'right' });
+
+        y += 4.5;
+      }
+
+      // Highlights / Bullets
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(8.5);
+      doc.setTextColor(51, 65, 85); // Slate-700
+
       role.highlights.forEach((h) => {
-        const bulletText = `•  ${h}`;
-        const hLines = doc.splitTextToSize(bulletText, contentWidth - 2);
-        checkPageBreak(hLines.length * 3.6);
-        doc.text(hLines, marginLeft + 2, y);
-        y += hLines.length * 3.6 + 1;
+        const bulletPrefix = '• ';
+        const bulletIndent = 3; // 3mm indent
+        const bulletWidth = contentWidth - bulletIndent;
+
+        const hLines = doc.splitTextToSize(`${bulletPrefix}${h}`, bulletWidth);
+        checkPageBreak(hLines.length * 3.6 + 1);
+
+        doc.text(hLines, marginLeft + bulletIndent, y);
+        y += hLines.length * 3.6 + 1.5;
       });
 
-      y += 2;
+      y += 2.5; // Spacing after role
     });
 
-    y += 2;
+    y += 2; // Spacing after company
   });
 
   // FORMAÇÃO ACADÊMICA
@@ -146,7 +249,7 @@ export async function generatePdfBlob(resume: FullResumeData): Promise<Blob> {
   resume.education.forEach((edu) => {
     const eduText = `•  ${edu.degree} — ${edu.institution} (${edu.status})`;
     const eduLines = doc.splitTextToSize(eduText, contentWidth);
-    checkPageBreak(eduLines.length * 3.8);
+    checkPageBreak(eduLines.length * 3.8 + 1);
     doc.text(eduLines, marginLeft, y);
     y += eduLines.length * 3.8 + 1.5;
   });
@@ -158,9 +261,10 @@ export async function generatePdfBlob(resume: FullResumeData): Promise<Blob> {
   doc.setFontSize(8.5);
   resume.languages.forEach((lang) => {
     const lText = `•  ${lang.language}: ${lang.level}`;
-    checkPageBreak(4);
-    doc.text(lText, marginLeft, y);
-    y += 4;
+    const lLines = doc.splitTextToSize(lText, contentWidth);
+    checkPageBreak(lLines.length * 3.8 + 1);
+    doc.text(lLines, marginLeft, y);
+    y += lLines.length * 3.8 + 1;
   });
 
   const pdfOutput = doc.output('blob');

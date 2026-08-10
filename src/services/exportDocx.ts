@@ -6,8 +6,9 @@ import {
   HeadingLevel,
   AlignmentType,
 } from 'docx';
-import { saveAs } from 'file-saver';
+import saveAs from 'file-saver';
 import { FullResumeData } from './fullResume';
+import { formatCompactPeriod } from './exportPdf';
 
 /**
  * Sanitizes string for safe filename usage.
@@ -144,7 +145,7 @@ export async function generateDocxBlob(resume: FullResumeData): Promise<Blob> {
   resume.experiences.forEach((exp) => {
     children.push(
       new Paragraph({
-        spacing: { before: 120, after: 60 },
+        spacing: { before: 140, after: 60 },
         children: [
           new TextRun({
             text: exp.company.toUpperCase(),
@@ -158,26 +159,61 @@ export async function generateDocxBlob(resume: FullResumeData): Promise<Blob> {
     );
 
     exp.roles.forEach((role) => {
-      children.push(
-        new Paragraph({
-          spacing: { after: 60 },
-          children: [
-            new TextRun({
-              text: `${role.title} `,
-              bold: true,
-              size: 20,
-              font: 'Arial',
-              color: '1E293B',
-            }),
-            new TextRun({
-              text: `(${role.period})`,
-              size: 19,
-              font: 'Arial',
-              color: '64748B',
-            }),
-          ],
-        })
-      );
+      const formattedPeriod = formatCompactPeriod(role.period);
+      const isLongHeader = role.title.length + formattedPeriod.length > 55;
+
+      if (isLongHeader) {
+        // Stacked Title & Date for clean layout in Word / Google Docs
+        children.push(
+          new Paragraph({
+            spacing: { before: 60, after: 20 },
+            children: [
+              new TextRun({
+                text: role.title,
+                bold: true,
+                size: 20, // 10pt
+                font: 'Arial',
+                color: '1E293B',
+              }),
+            ],
+          })
+        );
+        children.push(
+          new Paragraph({
+            spacing: { after: 60 },
+            children: [
+              new TextRun({
+                text: formattedPeriod,
+                size: 19, // 9.5pt
+                font: 'Arial',
+                color: '64748B',
+              }),
+            ],
+          })
+        );
+      } else {
+        // Single paragraph when title & date fit comfortably
+        children.push(
+          new Paragraph({
+            spacing: { before: 60, after: 60 },
+            children: [
+              new TextRun({
+                text: `${role.title} `,
+                bold: true,
+                size: 20,
+                font: 'Arial',
+                color: '1E293B',
+              }),
+              new TextRun({
+                text: ` (${formattedPeriod})`,
+                size: 19,
+                font: 'Arial',
+                color: '64748B',
+              }),
+            ],
+          })
+        );
+      }
 
       role.highlights.forEach((highlight) => {
         children.push(
@@ -222,7 +258,7 @@ export async function generateDocxBlob(resume: FullResumeData): Promise<Blob> {
     );
   });
 
-  // CERTIFICAÇÕES & IDIOMAS
+  // IDIOMAS
   children.push(createSectionHeading('Idiomas'));
   resume.languages.forEach((lang) => {
     children.push(
@@ -252,7 +288,7 @@ export async function generateDocxBlob(resume: FullResumeData): Promise<Blob> {
         properties: {
           page: {
             margin: {
-              top: 1440, // 1 inch
+              top: 1440, // 1 inch (72 pt * 20 = 1440 twips)
               right: 1440,
               bottom: 1440,
               left: 1440,
