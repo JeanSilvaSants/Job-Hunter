@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { Target, PlusCircle, TrendingUp, Cloud } from 'lucide-react';
+import { Target, PlusCircle, TrendingUp, Cloud, LogOut } from 'lucide-react';
 import { UserProfile } from '../types';
-import { isSupabaseConfigured, initSupabase } from '../services/supabase';
+import { isSupabaseConfigured, initSupabase, supabaseClient } from '../services/supabase';
 
 interface HeaderProps {
   profile: UserProfile;
@@ -25,6 +25,12 @@ export const Header: React.FC<HeaderProps> = ({
       setConfigured(isSupabaseConfigured);
     });
   }, []);
+
+  const handleSignOut = async () => {
+    if (supabaseClient) {
+      await supabaseClient.auth.signOut();
+    }
+  };
 
   return (
     <header className="bg-white border-b border-slate-200 text-slate-900 sticky top-0 z-30 shadow-xs">
@@ -105,6 +111,16 @@ export const Header: React.FC<HeaderProps> = ({
             >
               <PlusCircle className="w-3.5 h-3.5" />
               <span>Simular Vaga</span>
+            </button>
+
+            <button
+              id="btn-sign-out-header"
+              onClick={handleSignOut}
+              className="flex items-center gap-1.5 bg-rose-50 hover:bg-rose-100 text-rose-800 border border-rose-200 font-bold px-2.5 py-1.5 rounded-md text-xs transition cursor-pointer shadow-2xs"
+              title="Sair da conta e encerrar sessão"
+            >
+              <LogOut className="w-3.5 h-3.5 text-rose-600" />
+              <span>Sair</span>
             </button>
           </div>
 

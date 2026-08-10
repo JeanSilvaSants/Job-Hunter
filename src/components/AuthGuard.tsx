@@ -35,16 +35,56 @@ export const AuthGuard: React.FC<AuthGuardProps> = ({ children }) => {
         return;
       }
 
-      // 1. Initial Session Check
+      // 1. Initial Session Check & Validation with getUser()
       supabaseClient.auth
         .getSession()
-        .then(({ data: { session } }) => {
-          if (mounted) {
-            setAuthState(session ? 'AUTHENTICATED' : 'UNAUTHENTICATED');
+        .then(async ({ data: { session } }) => {
+          if (!mounted) return;
+
+          if (session) {
+            try {
+              const { data: { user }, error } = await supabaseClient.auth.getUser();
+              if (!mounted) return;
+
+              if (error || !user) {
+                console.warn('[AuthGuard] Sessão local encontrada mas usuário é inválido ou foi excluído no Supabase. Limpando sessão local...');
+                try {
+                  await supabaseClient.auth.signOut({ scope: 'local' });
+                } catch {
+                  // Fallback: remover chaves de autenticação do Supabase do localStorage
+                  for (let i = 0; i < localStorage.length; i++) {
+                    const key = localStorage.key(i);
+                    if (key && (key.startsWith('sb-') || key.includes('supabase.auth.token'))) {
+                      localStorage.removeItem(key);
+                    }
+                  }
+                }
+                setAuthState('UNAUTHENTICATED');
+                return;
+              }
+
+              setAuthState('AUTHENTICATED');
+            } catch (err) {
+              console.warn('[AuthGuard] Erro ao validar usuário no Supabase:', err);
+              try {
+                await supabaseClient.auth.signOut({ scope: 'local' });
+              } catch {
+                // ignore
+              }
+              if (mounted) setAuthState('UNAUTHENTICATED');
+            }
+          } else {
+            setAuthState('UNAUTHENTICATED');
           }
         })
-        .catch(() => {
-          if (mounted) setAuthState('UNAUTHENTICATED');
+        .catch(async () => {
+          if (!mounted) return;
+          try {
+            await supabaseClient.auth.signOut({ scope: 'local' });
+          } catch {
+            // ignore
+          }
+          setAuthState('UNAUTHENTICATED');
         });
 
       // 2. Listen for Auth changes

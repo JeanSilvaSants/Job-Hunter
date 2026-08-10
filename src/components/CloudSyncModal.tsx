@@ -257,14 +257,26 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
               </div>
             </div>
 
-            <button
-              onClick={handleTestConnection}
-              disabled={loading}
-              className="px-3 py-1.5 bg-white border border-slate-300 hover:border-slate-400 text-slate-800 font-bold text-xs rounded transition flex items-center gap-1.5 shrink-0 shadow-2xs cursor-pointer"
-            >
-              <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
-              <span>Testar Conexão</span>
-            </button>
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                onClick={handleTestConnection}
+                disabled={loading}
+                className="px-3 py-1.5 bg-white border border-slate-300 hover:border-slate-400 text-slate-800 font-bold text-xs rounded transition flex items-center gap-1.5 shadow-2xs cursor-pointer"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+                <span>Testar Conexão</span>
+              </button>
+
+              <button
+                onClick={handleSignOut}
+                disabled={loading}
+                className="px-3 py-1.5 bg-rose-50 hover:bg-rose-100 border border-rose-200 text-rose-800 font-bold text-xs rounded transition flex items-center gap-1.5 shadow-2xs cursor-pointer"
+                title="Encerrar sessão no Supabase"
+              >
+                <LogOut className="w-3.5 h-3.5 text-rose-600" />
+                <span>Sair da conta</span>
+              </button>
+            </div>
           </div>
 
           {/* Configuration Diagnostics Panel */}
@@ -444,12 +456,23 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
           <span className="text-[11px] text-slate-500 font-medium">
             Última sincronização: {diag.lastSync || 'Nenhuma nesta sessão'}
           </span>
-          <button
-            onClick={onClose}
-            className="px-4 py-2 bg-slate-800 hover:bg-slate-900 text-white font-bold text-xs rounded transition cursor-pointer"
-          >
-            Fechar
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleSignOut}
+              disabled={loading}
+              className="px-3 py-1.5 bg-rose-50 hover:bg-rose-100 border border-rose-200 text-rose-800 font-bold text-xs rounded transition flex items-center gap-1.5 cursor-pointer"
+              title="Encerrar sessão no Supabase e voltar para o login"
+            >
+              <LogOut className="w-3.5 h-3.5 text-rose-600" />
+              <span>Sair da conta</span>
+            </button>
+            <button
+              onClick={onClose}
+              className="px-4 py-2 bg-slate-800 hover:bg-slate-900 text-white font-bold text-xs rounded transition cursor-pointer"
+            >
+              Fechar
+            </button>
+          </div>
         </div>
       </div>
     </div>
