@@ -17,22 +17,20 @@ function getEnvVar(viteKey: string, processKey: string): string | undefined {
 
 
 const supabaseUrl = getEnvVar('VITE_SUPABASE_URL', 'SUPABASE_URL');
-const supabaseAnonKey =
+const supabasePublishableKey =
   getEnvVar('VITE_SUPABASE_PUBLISHABLE_KEY', 'SUPABASE_PUBLISHABLE_KEY') ||
   getEnvVar('VITE_SUPABASE_ANON_KEY', 'SUPABASE_ANON_KEY');
 
-export const isSupabaseConfigured = Boolean(
-  supabaseUrl &&
-  supabaseUrl.trim().length > 0 &&
-  supabaseAnonKey &&
-  supabaseAnonKey.trim().length > 0
-);
+export const hasSupabaseUrl = Boolean(supabaseUrl && supabaseUrl.trim().length > 0);
+export const hasPublishableKey = Boolean(supabasePublishableKey && supabasePublishableKey.trim().length > 0);
+
+export const isSupabaseConfigured = hasSupabaseUrl && hasPublishableKey;
 
 export let supabaseClient: SupabaseClient | null = null;
 
-if (isSupabaseConfigured && supabaseUrl && supabaseAnonKey) {
+if (isSupabaseConfigured && supabaseUrl && supabasePublishableKey) {
   try {
-    supabaseClient = createClient(supabaseUrl, supabaseAnonKey, {
+    supabaseClient = createClient(supabaseUrl, supabasePublishableKey, {
       auth: {
         persistSession: true,
         autoRefreshToken: true,

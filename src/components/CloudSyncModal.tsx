@@ -19,7 +19,7 @@ import {
   UserCheck,
   Lock,
 } from 'lucide-react';
-import { isSupabaseConfigured, supabaseClient } from '../services/supabase';
+import { isSupabaseConfigured, hasSupabaseUrl, hasPublishableKey, supabaseClient } from '../services/supabase';
 import {
   getCloudSyncDiagnostics,
   CloudSyncDiagnostics,
@@ -49,6 +49,9 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
   onDataRestored,
 }) => {
   const [diag, setDiag] = useState<CloudSyncDiagnostics>({
+    hasUrl: hasSupabaseUrl,
+    hasPublishableKey: hasPublishableKey,
+    clientInitialized: Boolean(supabaseClient !== null),
     configured: isSupabaseConfigured,
     authenticated: false,
     userEmail: null,
@@ -243,7 +246,7 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
                 <p className="text-xs text-slate-600 mt-1 leading-relaxed">
                   {diag.connected
                     ? 'Seus dados estão protegidos por RLS (`auth.uid() = user_id`). Apenas a sua conta de e-mail autenticada possui autorização de leitura e escrita.'
-                    : 'Modo local ativo no localStorage. Faça login ou configure VITE_SUPABASE_URL e VITE_SUPABASE_ANON_KEY no .env para ativar a nuvem RLS.'}
+                    : 'Modo local ativo no localStorage. Faça login ou configure VITE_SUPABASE_URL e VITE_SUPABASE_PUBLISHABLE_KEY no .env para ativar a nuvem RLS.'}
                 </p>
               </div>
             </div>
@@ -256,6 +259,40 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
               <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
               <span>Testar Conexão</span>
             </button>
+          </div>
+
+          {/* Configuration Diagnostics Panel */}
+          <div className="bg-slate-50 border border-slate-200 rounded-lg p-3.5 space-y-2 text-xs">
+            <div className="font-extrabold text-slate-800 text-[11px] uppercase tracking-wider mb-2 flex items-center gap-1.5">
+              <Server className="w-3.5 h-3.5 text-indigo-600" />
+              <span>Diagnóstico de Configuração</span>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+              <div className="flex items-center justify-between p-2 bg-white rounded border border-slate-200">
+                <span className="text-slate-600 font-medium">Supabase URL detectada:</span>
+                <span className={`font-black px-2 py-0.5 rounded text-[10px] ${diag.hasUrl ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'}`}>
+                  {diag.hasUrl ? 'SIM' : 'NÃO'}
+                </span>
+              </div>
+              <div className="flex items-center justify-between p-2 bg-white rounded border border-slate-200">
+                <span className="text-slate-600 font-medium">Publishable Key detectada:</span>
+                <span className={`font-black px-2 py-0.5 rounded text-[10px] ${diag.hasPublishableKey ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'}`}>
+                  {diag.hasPublishableKey ? 'SIM' : 'NÃO'}
+                </span>
+              </div>
+              <div className="flex items-center justify-between p-2 bg-white rounded border border-slate-200">
+                <span className="text-slate-600 font-medium">Cliente Supabase inicializado:</span>
+                <span className={`font-black px-2 py-0.5 rounded text-[10px] ${diag.clientInitialized ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'}`}>
+                  {diag.clientInitialized ? 'SIM' : 'NÃO'}
+                </span>
+              </div>
+              <div className="flex items-center justify-between p-2 bg-white rounded border border-slate-200">
+                <span className="text-slate-600 font-medium">Sessão autenticada:</span>
+                <span className={`font-black px-2 py-0.5 rounded text-[10px] ${diag.authenticated ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'}`}>
+                  {diag.authenticated ? 'SIM' : 'NÃO'}
+                </span>
+              </div>
+            </div>
           </div>
 
           {actionMessage && (

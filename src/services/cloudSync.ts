@@ -1,8 +1,18 @@
-import { supabaseClient, isSupabaseConfigured, generateExternalKey, getAuthenticatedUserId } from './supabase';
+import {
+  supabaseClient,
+  isSupabaseConfigured,
+  hasSupabaseUrl,
+  hasPublishableKey,
+  generateExternalKey,
+  getAuthenticatedUserId,
+} from './supabase';
 import { Job, JobWithAnalysis, ApplicationStatus } from '../types';
 import { TailoredResume } from './resume';
 
 export interface CloudSyncDiagnostics {
+  hasUrl: boolean;
+  hasPublishableKey: boolean;
+  clientInitialized: boolean;
   configured: boolean;
   authenticated: boolean;
   connected: boolean;
@@ -507,6 +517,9 @@ export async function getCloudSyncDiagnostics(): Promise<CloudSyncDiagnostics> {
   }
 
   return {
+    hasUrl: hasSupabaseUrl,
+    hasPublishableKey: hasPublishableKey,
+    clientInitialized: Boolean(supabaseClient !== null),
     configured,
     authenticated,
     userEmail,
