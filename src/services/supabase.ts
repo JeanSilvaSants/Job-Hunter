@@ -20,34 +20,75 @@ function getEnvVar(primaryKey: string, fallbackKey?: string): string | undefined
   return undefined;
 }
 
-const supabaseUrl = getEnvVar('VITE_SUPABASE_URL');
-const supabasePublishableKey = getEnvVar('VITE_SUPABASE_PUBLISHABLE_KEY', 'VITE_SUPABASE_ANON_KEY');
-
-export const hasSupabaseUrl = Boolean(supabaseUrl && supabaseUrl.trim().length > 0);
-export const hasPublishableKey = Boolean(supabasePublishableKey && supabasePublishableKey.trim().length > 0);
-
-export const isSupabaseConfigured = hasSupabaseUrl && hasPublishableKey;
-
+export let hasSupabaseUrl = false;
+export let hasPublishableKey = false;
+export let isSupabaseConfigured = false;
 export let supabaseClient: SupabaseClient | null = null;
 
-if (isSupabaseConfigured && supabaseUrl && supabasePublishableKey) {
-  try {
-    supabaseClient = createClient(supabaseUrl, supabasePublishableKey, {
-      auth: {
-        persistSession: true,
-        autoRefreshToken: true,
-      },
-    });
-  } catch (err) {
-    console.warn('[Supabase] Erro ao inicializar cliente Supabase:', err);
-    supabaseClient = null;
+let initPromise: Promise<boolean> | null = null;
+
+export function initSupabase(): Promise<boolean> {
+  if (initPromise) {
+    return initPromise;
   }
+
+  initPromise = (async () => {
+    let url = getEnvVar('VITE_SUPABASE_URL');
+    let key = getEnvVar('VITE_SUPABASE_PUBLISHABLE_KEY', 'VITE_SUPABASE_ANON_KEY');
+
+    // If static env didn't supply credentials and we are in a browser, fetch from /api/config
+    if ((!url || !key) && typeof window !== 'undefined' && typeof fetch !== 'undefined') {
+      try {
+        const res = await fetch('/api/config');
+        if (res.ok) {
+          const config = await res.json();
+          if (config.supabaseUrl && config.supabaseUrl.trim().length > 0) {
+            url = config.supabaseUrl.trim();
+          }
+          if (config.supabasePublishableKey && config.supabasePublishableKey.trim().length > 0) {
+            key = config.supabasePublishableKey.trim();
+          }
+        }
+      } catch (err) {
+        console.warn('[Supabase] Erro ao buscar /api/config:', err);
+      }
+    }
+
+    hasSupabaseUrl = Boolean(url && url.trim().length > 0);
+    hasPublishableKey = Boolean(key && key.trim().length > 0);
+    isSupabaseConfigured = hasSupabaseUrl && hasPublishableKey;
+
+    if (isSupabaseConfigured && url && key) {
+      if (!supabaseClient) {
+        try {
+          supabaseClient = createClient(url, key, {
+            auth: {
+              persistSession: true,
+              autoRefreshToken: true,
+            },
+          });
+        } catch (err) {
+          console.warn('[Supabase] Erro ao inicializar cliente Supabase:', err);
+          supabaseClient = null;
+          isSupabaseConfigured = false;
+        }
+      }
+    }
+
+    return isSupabaseConfigured;
+  })();
+
+  return initPromise;
 }
+
+// Trigger initial resolution immediately on module load
+initSupabase();
 
 /**
  * Retorna o ID do usuário autenticado no Supabase ou null se não houver sessão ativa.
  */
 export async function getAuthenticatedUserId(): Promise<string | null> {
+  await initSupabase();
   if (!isSupabaseConfigured || !supabaseClient) {
     return null;
   }

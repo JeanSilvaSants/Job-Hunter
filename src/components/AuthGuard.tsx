@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Loader2, ShieldCheck } from 'lucide-react';
-import { supabaseClient, isSupabaseConfigured } from '../services/supabase';
+import { supabaseClient, isSupabaseConfigured, initSupabase } from '../services/supabase';
 import { LoginScreen } from './LoginScreen';
 
 type AuthState = 'CHECKING_SESSION' | 'AUTHENTICATED' | 'UNAUTHENTICATED';
@@ -10,47 +10,46 @@ interface AuthGuardProps {
 }
 
 export const AuthGuard: React.FC<AuthGuardProps> = ({ children }) => {
-  const [authState, setAuthState] = useState<AuthState>(
-    isSupabaseConfigured ? 'CHECKING_SESSION' : 'AUTHENTICATED'
-  );
+  const [authState, setAuthState] = useState<AuthState>('CHECKING_SESSION');
 
   useEffect(() => {
-    if (!isSupabaseConfigured || !supabaseClient) {
-      setAuthState('AUTHENTICATED');
-      return;
-    }
-
     let mounted = true;
+    let subscription: { unsubscribe: () => void } | null = null;
 
-    // 1. Initial Session Check
-    supabaseClient.auth.getSession().then(({ data: { session } }) => {
-      if (mounted) {
-        if (session) {
-          setAuthState('AUTHENTICATED');
-        } else {
-          setAuthState('UNAUTHENTICATED');
-        }
+    initSupabase().then(() => {
+      if (!mounted) return;
+
+      if (!isSupabaseConfigured || !supabaseClient) {
+        setAuthState('AUTHENTICATED');
+        return;
       }
-    }).catch(() => {
-      if (mounted) setAuthState('UNAUTHENTICATED');
-    });
 
-    // 2. Listen for Auth changes
-    const { data: { subscription } } = supabaseClient.auth.onAuthStateChange(
-      (_event, session) => {
-        if (mounted) {
-          if (session) {
-            setAuthState('AUTHENTICATED');
-          } else {
-            setAuthState('UNAUTHENTICATED');
+      // 1. Initial Session Check
+      supabaseClient.auth
+        .getSession()
+        .then(({ data: { session } }) => {
+          if (mounted) {
+            setAuthState(session ? 'AUTHENTICATED' : 'UNAUTHENTICATED');
           }
+        })
+        .catch(() => {
+          if (mounted) setAuthState('UNAUTHENTICATED');
+        });
+
+      // 2. Listen for Auth changes
+      const res = supabaseClient.auth.onAuthStateChange((_event, session) => {
+        if (mounted) {
+          setAuthState(session ? 'AUTHENTICATED' : 'UNAUTHENTICATED');
         }
-      }
-    );
+      });
+      subscription = res.data.subscription;
+    });
 
     return () => {
       mounted = false;
-      subscription.unsubscribe();
+      if (subscription) {
+        subscription.unsubscribe();
+      }
     };
   }, []);
 

@@ -203,6 +203,25 @@ async function startServer() {
     });
   });
 
+  // Public Configuration Endpoint (Supabase Frontend Credentials Only)
+  app.get('/api/config', (req, res) => {
+    const supabaseUrl =
+      process.env.VITE_SUPABASE_URL ||
+      process.env.SUPABASE_URL ||
+      '';
+    const supabasePublishableKey =
+      process.env.VITE_SUPABASE_PUBLISHABLE_KEY ||
+      process.env.SUPABASE_PUBLISHABLE_KEY ||
+      process.env.VITE_SUPABASE_ANON_KEY ||
+      process.env.SUPABASE_ANON_KEY ||
+      '';
+
+    return res.json({
+      supabaseUrl: supabaseUrl.trim(),
+      supabasePublishableKey: supabasePublishableKey.trim(),
+    });
+  });
+
   // Health check endpoint
   app.get('/api/health', (req, res) => {
     res.json({

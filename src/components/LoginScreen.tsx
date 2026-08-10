@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Lock, Mail, ArrowRight, ShieldCheck, Cloud, AlertCircle, Loader2 } from 'lucide-react';
-import { supabaseClient } from '../services/supabase';
+import { supabaseClient, initSupabase } from '../services/supabase';
 
 interface LoginScreenProps {
   onLoginSuccess: () => void;
@@ -18,6 +18,8 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
       setErrorMessage('Por favor, informe e-mail e senha.');
       return;
     }
+
+    await initSupabase();
 
     if (!supabaseClient) {
       setErrorMessage('Cliente Supabase não inicializado.');

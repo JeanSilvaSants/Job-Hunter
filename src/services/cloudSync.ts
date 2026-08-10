@@ -5,6 +5,7 @@ import {
   hasPublishableKey,
   generateExternalKey,
   getAuthenticatedUserId,
+  initSupabase,
 } from './supabase';
 import { Job, JobWithAnalysis, ApplicationStatus } from '../types';
 import { TailoredResume } from './resume';
@@ -35,6 +36,7 @@ const savedSnapshotsThisSession = new Set<string>();
  * Checks connectivity to Supabase.
  */
 export async function testSupabaseConnection(): Promise<boolean> {
+  await initSupabase();
   if (!isSupabaseConfigured || !supabaseClient) {
     return false;
   }
@@ -482,6 +484,7 @@ export async function migrateLocalDataToSupabase(
  * Diagnostics stats for UI panel.
  */
 export async function getCloudSyncDiagnostics(): Promise<CloudSyncDiagnostics> {
+  await initSupabase();
   const configured = isSupabaseConfigured;
   let authenticated = false;
   let userEmail: string | null = null;
