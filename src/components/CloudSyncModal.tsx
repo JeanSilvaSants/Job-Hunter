@@ -26,6 +26,7 @@ import {
   restoreCloudData,
   migrateLocalDataToSupabase,
   testSupabaseConnection,
+  DetailedMigrationResult,
 } from '../services/cloudSync';
 import { JobWithAnalysis, ApplicationStatus } from '../types';
 import { TailoredResume } from '../services/resume';
@@ -73,12 +74,18 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
   const [loading, setLoading] = useState(true);
   const [actionMessage, setActionMessage] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null);
   const [copiedSql, setCopiedSql] = useState(false);
+  const [syncResult, setSyncResult] = useState<DetailedMigrationResult | null>(null);
 
   const fetchDiagnostics = async () => {
     setLoading(true);
-    const d = await getCloudSyncDiagnostics();
-    setDiag(d);
-    setLoading(false);
+    try {
+      const d = await getCloudSyncDiagnostics();
+      setDiag(d);
+    } catch (err) {
+      console.warn('[CloudSyncModal] Error fetching diagnostics:', err);
+    } finally {
+      setLoading(false);
+    }
   };
 
   useEffect(() => {
@@ -88,63 +95,107 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
   const handleTestConnection = async () => {
     setLoading(true);
     setActionMessage(null);
-    const ok = await testSupabaseConnection();
-    await fetchDiagnostics();
-    setLoading(false);
-
-    if (ok) {
-      setActionMessage({ type: 'success', text: 'Conexão segura com Supabase RLS verificada com sucesso!' });
-    } else {
-      setActionMessage({
-        type: 'error',
-        text: 'Não foi possível conectar ao Supabase com sessão ativa. Verifique se está autenticado e com as variáveis ativas.',
-      });
+    try {
+      const ok = await testSupabaseConnection();
+      await fetchDiagnostics();
+      if (ok) {
+        setActionMessage({ type: 'success', text: 'Conexão segura com Supabase RLS verificada com sucesso!' });
+      } else {
+        setActionMessage({
+          type: 'error',
+          text: 'Não foi possível conectar ao Supabase com sessão ativa. Verifique se está autenticado e com as variáveis ativas.',
+        });
+      }
+    } catch (err: any) {
+      setActionMessage({ type: 'error', text: `Erro ao testar conexão: ${err.message || String(err)}` });
+    } finally {
+      setLoading(false);
     }
   };
 
   const handleSignOut = async () => {
     setLoading(true);
-    await signOutUser();
+    try {
+      await signOutUser();
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleMigrateLocal = async () => {
     setLoading(true);
-    setActionMessage({ type: 'info', text: 'Sincronizando dados locais vinculados ao seu ID de usuário...' });
+    setActionMessage({ type: 'info', text: 'Iniciando sincronização e auditoria por etapa com Supabase...' });
+    setSyncResult(null);
 
-    const result = await migrateLocalDataToSupabase(appliedMap, tailoredResumesMap, jobs);
-    await fetchDiagnostics();
-    setLoading(false);
+    try {
+      const result = await migrateLocalDataToSupabase(
+        appliedMap,
+        tailoredResumesMap,
+        jobs,
+        (progress) => {
+          setSyncResult(progress);
+        }
+      );
 
-    setActionMessage({
-      type: 'success',
-      text: `Sincronização concluída! ${result.migratedJobs} vagas, ${result.migratedApps} candidaturas e ${result.migratedResumes} currículos vinculados à sua conta no Supabase.`,
-    });
+      setSyncResult(result);
+      await fetchDiagnostics();
+
+      if (result.status === 'SUCCESS') {
+        setActionMessage({
+          type: 'success',
+          text: `Sincronização concluída com sucesso! ${result.summary.jobsSynced} vagas, ${result.summary.appsSynced} candidaturas, ${result.summary.resumesSynced} currículos e ${result.summary.snapshotsSynced} snapshots vinculados à sua conta no Supabase.`,
+        });
+      } else if (result.status === 'TIMEOUT') {
+        setActionMessage({
+          type: 'error',
+          text: `TIMEOUT NA ETAPA: ${result.failedStepName || 'Operação'}. A requisição excedeu o tempo limite.`,
+        });
+      } else {
+        setActionMessage({
+          type: 'error',
+          text: `ERRO NA ETAPA: ${result.failedStepName || 'Sincronização'}. ${result.error?.message || 'Falha na operação.'}`,
+        });
+      }
+    } catch (err: any) {
+      console.error('[CloudSyncModal] Error migrating local data:', err);
+      setActionMessage({
+        type: 'error',
+        text: `ERRO INESPERADO: ${err.message || String(err)}`,
+      });
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleRestoreFromCloud = async () => {
     setLoading(true);
     setActionMessage({ type: 'info', text: 'Buscando registros privados da nuvem (RLS filtered)...' });
 
-    const cloudData = await restoreCloudData();
-    await fetchDiagnostics();
-    setLoading(false);
+    try {
+      const cloudData = await restoreCloudData();
+      await fetchDiagnostics();
 
-    if (cloudData) {
-      if (onDataRestored) {
-        onDataRestored({
-          appliedMap: cloudData.appliedMap,
-          tailoredResumesMap: cloudData.tailoredResumesMap,
+      if (cloudData) {
+        if (onDataRestored) {
+          onDataRestored({
+            appliedMap: cloudData.appliedMap,
+            tailoredResumesMap: cloudData.tailoredResumesMap,
+          });
+        }
+        setActionMessage({
+          type: 'success',
+          text: `Restauração concluída! Recuperados ${cloudData.restoredJobs} vagas, ${cloudData.restoredApplications} status e ${cloudData.restoredResumes} currículos customizados do seu usuário.`,
+        });
+      } else {
+        setActionMessage({
+          type: 'error',
+          text: 'Falha ao restaurar dados da nuvem. Verifique a conexão com o Supabase.',
         });
       }
-      setActionMessage({
-        type: 'success',
-        text: `Restauração concluída! Recuperados ${cloudData.restoredJobs} vagas, ${cloudData.restoredApplications} status e ${cloudData.restoredResumes} currículos customizados do seu usuário.`,
-      });
-    } else {
-      setActionMessage({
-        type: 'error',
-        text: 'Falha ao restaurar dados da nuvem. Verifique a conexão com o Supabase.',
-      });
+    } catch (err: any) {
+      setActionMessage({ type: 'error', text: `Erro na restauração: ${err.message || String(err)}` });
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -356,6 +407,122 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
             </div>
           )}
 
+          {/* Real-time Step-by-Step Diagnostic & Progress Dashboard */}
+          {syncResult && (
+            <div className="bg-slate-900 text-slate-100 rounded-xl p-4 border border-slate-800 space-y-3 text-xs shadow-inner">
+              <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                <div className="flex items-center gap-2">
+                  <Activity className="w-4 h-4 text-indigo-400 animate-pulse" />
+                  <span className="font-extrabold uppercase text-[11px] text-indigo-300 tracking-wider">
+                    Diagnóstico por Etapa (Sender Sync Audit)
+                  </span>
+                </div>
+                <span
+                  className={`px-2 py-0.5 rounded text-[10px] font-black uppercase ${
+                    syncResult.status === 'SUCCESS'
+                      ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+                      : syncResult.status === 'TIMEOUT'
+                      ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
+                      : 'bg-rose-500/20 text-rose-300 border border-rose-500/40'
+                  }`}
+                >
+                  {syncResult.status === 'SUCCESS' ? 'SUCESSO' : syncResult.status === 'TIMEOUT' ? 'TIMEOUT' : 'ERRO'}
+                </span>
+              </div>
+
+              <div className="space-y-2">
+                {syncResult.steps.map((step, idx) => (
+                  <div key={step.id} className="bg-slate-950/60 p-2.5 rounded border border-slate-800/80 space-y-1">
+                    <div className="flex items-center justify-between text-[11px]">
+                      <div className="flex items-center gap-2 font-bold">
+                        <span className="text-slate-500">{idx + 1}.</span>
+                        <span className="text-slate-200">{step.name}</span>
+                      </div>
+                      <span
+                        className={`px-2 py-0.5 rounded text-[10px] font-extrabold uppercase ${
+                          step.status === 'OK'
+                            ? 'bg-emerald-500/20 text-emerald-400'
+                            : step.status === 'IN_PROGRESS'
+                            ? 'bg-indigo-500/20 text-indigo-300 animate-pulse'
+                            : step.status === 'ERROR'
+                            ? 'bg-rose-500/20 text-rose-400'
+                            : step.status === 'TIMEOUT'
+                            ? 'bg-amber-500/20 text-amber-400'
+                            : 'bg-slate-800 text-slate-500'
+                        }`}
+                      >
+                        {step.status === 'OK'
+                          ? 'OK'
+                          : step.status === 'IN_PROGRESS'
+                          ? 'EM ANDAMENTO'
+                          : step.status === 'ERROR'
+                          ? 'ERRO NA ETAPA'
+                          : step.status === 'TIMEOUT'
+                          ? 'TIMEOUT'
+                          : 'PENDENTE'}
+                      </span>
+                    </div>
+
+                    {step.status !== 'PENDING' && (
+                      <div className="text-[11px] text-slate-400 pl-4 space-y-0.5">
+                        {step.id === 'AUTH' && (
+                          <div>
+                            Sessão autenticada: <strong className={syncResult.userAuthOk ? 'text-emerald-400' : 'text-rose-400'}>{syncResult.userAuthOk ? 'OK' : 'Falha'}</strong>
+                            {syncResult.userId && <span className="block text-[10px] text-slate-500 font-mono">User ID: {syncResult.userId}</span>}
+                          </div>
+                        )}
+
+                        {step.id === 'JOBS' && (
+                          <div>
+                            Jobs: <strong className="text-slate-200">{step.foundCount}</strong> encontrados localmente /{' '}
+                            <strong className="text-emerald-400">{step.syncedCount}</strong> sincronizados
+                          </div>
+                        )}
+
+                        {step.id === 'APPLICATIONS' && (
+                          <div>
+                            Applications: <strong className="text-slate-200">{step.foundCount}</strong> encontradas /{' '}
+                            <strong className="text-emerald-400">{step.syncedCount}</strong> sincronizadas
+                          </div>
+                        )}
+
+                        {step.id === 'RESUMES' && (
+                          <div>
+                            Tailored Resumes: <strong className="text-slate-200">{step.foundCount}</strong> encontrados /{' '}
+                            <strong className="text-emerald-400">{step.syncedCount}</strong> sincronizados
+                          </div>
+                        )}
+
+                        {step.id === 'SNAPSHOTS' && (
+                          <div>
+                            Source Snapshots: <strong className="text-slate-200">{step.foundCount}</strong> encontrados /{' '}
+                            <strong className="text-emerald-400">{step.syncedCount}</strong> sincronizados
+                          </div>
+                        )}
+
+                        {step.id === 'COMPLETE' && (
+                          <div className="text-emerald-400 font-semibold">
+                            Sincronização concluída com sucesso no Supabase!
+                          </div>
+                        )}
+
+                        {step.error && (
+                          <div className="mt-2 p-2 bg-rose-950/50 border border-rose-800/60 rounded text-[10px] font-mono text-rose-300 space-y-0.5">
+                            <div className="font-extrabold text-rose-200 uppercase">ERRO NA ETAPA: {step.name}</div>
+                            <div><strong>error.message:</strong> {step.error.message || 'Sem mensagem'}</div>
+                            {step.error.code && <div><strong>error.code:</strong> {step.error.code}</div>}
+                            {step.error.details && <div><strong>error.details:</strong> {step.error.details}</div>}
+                            {step.error.hint && <div><strong>error.hint:</strong> {step.error.hint}</div>}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* Cloud Actions Bar */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <button
@@ -419,57 +586,22 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
           {/* Setup & Schema Guidance */}
           <div className="bg-slate-900 text-slate-200 rounded-lg p-4 space-y-3 text-xs border border-slate-800">
             <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2 font-extrabold text-indigo-400">
-                <Lock className="w-4 h-4" />
-                <span>POLÍTICA DE SEGURANÇA & SCHEMA RLS</span>
+              <div className="flex items-center gap-2">
+                <Shield className="w-4 h-4 text-indigo-400" />
+                <span className="font-extrabold uppercase text-[11px] text-white">Esquema RLS Seguro (FASE 2)</span>
               </div>
               <button
+                type="button"
                 onClick={handleCopySqlNotice}
-                className="text-[10px] font-bold bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 px-2.5 py-1 rounded transition flex items-center gap-1 cursor-pointer"
+                className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 text-[10px] font-bold rounded flex items-center gap-1.5 transition cursor-pointer"
               >
                 {copiedSql ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
-                <span>{copiedSql ? 'Copiado!' : 'Copia referência do SQL'}</span>
+                <span>{copiedSql ? 'Copiado!' : 'Copiar caminho SQL'}</span>
               </button>
             </div>
-
-            <ol className="list-decimal pl-5 space-y-2 text-slate-300 text-[11px] leading-relaxed">
-              <li>
-                A chave pública <code>anon</code> <strong>NÃO</strong> possui permissão de leitura nem escrita sem autenticação.
-              </li>
-              <li>
-                Cada tabela (<code>jobs</code>, <code>applications</code>, <code>tailored_resumes</code>, <code>source_snapshots</code>) exige <code>user_id</code> correspondente ao <code>auth.uid()</code> do usuário logado.
-              </li>
-              <li>
-                Para criar seu usuário único no Supabase: acesse o <strong>Supabase Dashboard ➔ Authentication ➔ Users ➔ Add user (Create user)</strong> e insira seu e-mail e senha.
-              </li>
-              <li>
-                Execute o arquivo <code className="text-emerald-400 font-bold">supabase/schema.sql</code> no <strong>SQL Editor</strong> do seu projeto no Supabase para aplicar a nova estrutura.
-              </li>
-            </ol>
-          </div>
-        </div>
-
-        {/* Footer */}
-        <div className="bg-slate-50 px-5 py-3 border-t border-slate-200 flex justify-between items-center shrink-0">
-          <span className="text-[11px] text-slate-500 font-medium">
-            Última sincronização: {diag.lastSync || 'Nenhuma nesta sessão'}
-          </span>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={handleSignOut}
-              disabled={loading}
-              className="px-3 py-1.5 bg-rose-50 hover:bg-rose-100 border border-rose-200 text-rose-800 font-bold text-xs rounded transition flex items-center gap-1.5 cursor-pointer"
-              title="Encerrar sessão no Supabase e voltar para o login"
-            >
-              <LogOut className="w-3.5 h-3.5 text-rose-600" />
-              <span>Sair da conta</span>
-            </button>
-            <button
-              onClick={onClose}
-              className="px-4 py-2 bg-slate-800 hover:bg-slate-900 text-white font-bold text-xs rounded transition cursor-pointer"
-            >
-              Fechar
-            </button>
+            <p className="text-slate-400 text-[11px] leading-relaxed">
+              Todas as tabelas usam chave primária UUID e chave estrangeira composta <code>(job_id, user_id) REFERENCES public.jobs(id, user_id) ON DELETE CASCADE</code>. O acesso a dados de outros usuários é bloqueado no nível de banco de dados pelo PostgreSQL RLS.
+            </p>
           </div>
         </div>
       </div>

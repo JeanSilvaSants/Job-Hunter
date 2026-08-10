@@ -10,6 +10,7 @@ import {
 } from './supabase';
 import { Job, JobWithAnalysis, ApplicationStatus } from '../types';
 import { TailoredResume } from './resume';
+import { DEFAULT_GREENHOUSE_BOARDS, LOCAL_STORAGE_BOARDS_KEY } from '../data/jobBoards';
 
 export interface CloudSyncDiagnostics {
   apiConfigStatus: string;
@@ -23,8 +24,8 @@ export interface CloudSyncDiagnostics {
   clientInitialized: boolean;
   configured: boolean;
   authenticated: boolean;
-  connected: boolean;
   userEmail: string | null;
+  connected: boolean;
   lastSync: string | null;
   jobsSynced: number;
   applicationsSynced: number;
@@ -33,11 +34,105 @@ export interface CloudSyncDiagnostics {
   errors: string[];
 }
 
+export interface SupabaseErrorDetails {
+  message?: string;
+  code?: string;
+  details?: string;
+  hint?: string;
+}
+
+export interface StepDiagnostic {
+  id: 'AUTH' | 'JOBS' | 'APPLICATIONS' | 'RESUMES' | 'SNAPSHOTS' | 'COMPLETE';
+  name: string;
+  status: 'PENDING' | 'IN_PROGRESS' | 'OK' | 'ERROR' | 'TIMEOUT';
+  foundCount: number;
+  syncedCount: number;
+  message?: string;
+  error?: SupabaseErrorDetails;
+}
+
+export interface DetailedMigrationResult {
+  status: 'SUCCESS' | 'ERROR' | 'TIMEOUT';
+  currentStepId?: string;
+  failedStepName?: string;
+  userAuthOk: boolean;
+  userId?: string;
+  userEmail?: string;
+  summary: {
+    jobsFound: number;
+    jobsSynced: number;
+    appsFound: number;
+    appsSynced: number;
+    resumesFound: number;
+    resumesSynced: number;
+    snapshotsFound: number;
+    snapshotsSynced: number;
+  };
+  steps: StepDiagnostic[];
+  error?: SupabaseErrorDetails;
+}
+
 let lastSyncTimestamp: string | null = null;
 let syncErrors: string[] = [];
 
-// Session cache to prevent saving source snapshot more than once per source per session (Rule 21)
+// Session cache to prevent saving source snapshot more than once per source per session
 const savedSnapshotsThisSession = new Set<string>();
+
+/**
+ * Defensive Promise wrapper with explicit timeout protection.
+ */
+export function withTimeout<T>(
+  promise: Promise<T> | PromiseLike<T>,
+  ms: number = 10000,
+  operationName: string = 'Operação Supabase'
+): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      const err: any = new Error(`TIMEOUT: Operação "${operationName}" excedeu o tempo limite de ${ms / 1000}s.`);
+      err.code = 'TIMEOUT';
+      reject(err);
+    }, ms);
+
+    Promise.resolve(promise)
+      .then((res) => {
+        clearTimeout(timer);
+        resolve(res as T);
+      })
+      .catch((err) => {
+        clearTimeout(timer);
+        reject(err);
+      });
+  });
+}
+
+/**
+ * Ensures payload objects do NOT contain `undefined` properties.
+ */
+function sanitizePayload<T extends Record<string, any>>(obj: T): T {
+  const clean: Record<string, any> = {};
+  for (const key of Object.keys(obj)) {
+    const val = obj[key];
+    if (val === undefined) {
+      clean[key] = null;
+    } else {
+      clean[key] = val;
+    }
+  }
+  return clean as T;
+}
+
+/**
+ * Extracts structured Postgrest/Supabase error details.
+ */
+function extractSupabaseError(err: any): SupabaseErrorDetails {
+  if (!err) return { message: 'Erro desconhecido' };
+  return {
+    message: err.message || String(err),
+    code: err.code ? String(err.code) : undefined,
+    details: err.details ? String(err.details) : undefined,
+    hint: err.hint ? String(err.hint) : undefined,
+  };
+}
 
 /**
  * Checks connectivity to Supabase.
@@ -48,12 +143,20 @@ export async function testSupabaseConnection(): Promise<boolean> {
     return false;
   }
   try {
-    const { data: { user } } = await supabaseClient.auth.getUser();
-    if (!user) {
+    const { data: { user }, error: authErr } = await withTimeout(
+      supabaseClient.auth.getUser(),
+      5000,
+      'auth.getUser'
+    );
+    if (authErr || !user) {
       console.warn('[CloudSync] Test connection: No authenticated user session.');
       return false;
     }
-    const { error } = await supabaseClient.from('jobs').select('id').limit(1);
+    const { error } = await withTimeout(
+      supabaseClient.from('jobs').select('id').limit(1),
+      5000,
+      'jobs.select'
+    );
     if (error) {
       console.warn('[CloudSync] Test connection error:', error.message);
       return false;
@@ -66,20 +169,19 @@ export async function testSupabaseConnection(): Promise<boolean> {
 }
 
 /**
- * Rule 7 & 11: Saves job to Supabase if authenticated AND (score >= 75 OR status != NEW OR forced manually).
- * Enforces user_id and composite constraint (user_id, external_key).
+ * Saves job to Supabase under authenticated user.
  */
 export async function syncJobToSupabase(
   job: Job | JobWithAnalysis,
-  options: { force?: boolean } = {}
+  options: { force?: boolean } = {},
+  overrideUserId?: string
 ): Promise<string | null> {
   if (!isSupabaseConfigured || !supabaseClient) {
     return null;
   }
 
-  const userId = await getAuthenticatedUserId();
+  const userId = overrideUserId || (await getAuthenticatedUserId());
   if (!userId) {
-    // Unauthenticated user — sync is strictly disabled
     return null;
   }
 
@@ -95,11 +197,11 @@ export async function syncJobToSupabase(
   const now = new Date().toISOString();
   const analysis = (job as JobWithAnalysis).analysis;
 
-  const payload = {
+  const payload = sanitizePayload({
     user_id: userId,
     external_key: extKey,
-    title: job.title,
-    company: job.company,
+    title: job.title || 'Sem título',
+    company: job.company || 'Empresa não informada',
     location: job.location || '',
     description: job.description || '',
     url: job.url || '',
@@ -117,14 +219,18 @@ export async function syncJobToSupabase(
     match_reasons: analysis?.matchReasons || [],
     last_seen_at: now,
     updated_at: now,
-  };
+  });
 
   try {
-    const { data, error } = await supabaseClient
-      .from('jobs')
-      .upsert(payload, { onConflict: 'user_id, external_key' })
-      .select('id')
-      .single();
+    const { data, error } = await withTimeout(
+      supabaseClient
+        .from('jobs')
+        .upsert(payload, { onConflict: 'user_id, external_key' })
+        .select('id')
+        .maybeSingle(),
+      8000,
+      `upsert job ${job.title}`
+    );
 
     if (error) {
       console.error('[CloudSync] Error upserting job:', error.message);
@@ -142,35 +248,38 @@ export async function syncJobToSupabase(
 }
 
 /**
- * Rule 9 & 12: Sync application status change to `applications` table.
- * Enforces job.user_id === authenticated user.id.
+ * Sync application status change to `applications` table.
  */
 export async function syncApplicationStatus(
   job: Job | JobWithAnalysis,
   status: ApplicationStatus,
-  notes?: string
+  notes?: string,
+  overrideUserId?: string,
+  overrideJobId?: string
 ): Promise<boolean> {
   if (!isSupabaseConfigured || !supabaseClient) {
     return false;
   }
 
-  const userId = await getAuthenticatedUserId();
+  const userId = overrideUserId || (await getAuthenticatedUserId());
   if (!userId) {
     return false;
   }
 
   try {
-    // 1. Ensure job is upserted first under current user_id
-    const jobId = await syncJobToSupabase(job, { force: true });
+    const jobId = overrideJobId || (await syncJobToSupabase(job, { force: true }, userId));
     if (!jobId) return false;
 
-    // 2. Fetch existing application to avoid overwriting existing timestamps
-    const { data: existingApp } = await supabaseClient
-      .from('applications')
-      .select('*')
-      .eq('user_id', userId)
-      .eq('job_id', jobId)
-      .maybeSingle();
+    const { data: existingApp } = await withTimeout(
+      supabaseClient
+        .from('applications')
+        .select('*')
+        .eq('user_id', userId)
+        .eq('job_id', jobId)
+        .maybeSingle(),
+      5000,
+      `select application ${job.title}`
+    );
 
     const now = new Date().toISOString();
 
@@ -180,10 +289,10 @@ export async function syncApplicationStatus(
     const rejected_at = status === 'REJECTED' ? (existingApp?.rejected_at || now) : existingApp?.rejected_at || null;
     const offer_at = status === 'OFFER' ? (existingApp?.offer_at || now) : existingApp?.offer_at || null;
 
-    const payload = {
+    const payload = sanitizePayload({
       user_id: userId,
       job_id: jobId,
-      status,
+      status: status || 'NEW',
       prepared_at,
       applied_at,
       interview_at,
@@ -191,11 +300,15 @@ export async function syncApplicationStatus(
       offer_at,
       notes: notes !== undefined ? notes : existingApp?.notes || '',
       updated_at: now,
-    };
+    });
 
-    const { error } = await supabaseClient
-      .from('applications')
-      .upsert(payload, { onConflict: 'user_id, job_id' });
+    const { error } = await withTimeout(
+      supabaseClient
+        .from('applications')
+        .upsert(payload, { onConflict: 'user_id, job_id' }),
+      8000,
+      `upsert application ${job.title}`
+    );
 
     if (error) {
       console.error('[CloudSync] Error syncing application status:', error.message);
@@ -213,35 +326,35 @@ export async function syncApplicationStatus(
 }
 
 /**
- * Rule 9 & 13: Sync tailored resume to `tailored_resumes` table.
- * Enforces job.user_id === authenticated user.id.
+ * Sync tailored resume to `tailored_resumes` table.
  */
 export async function syncTailoredResume(
   job: Job | JobWithAnalysis,
-  tailoredResume: TailoredResume
+  tailoredResume: TailoredResume,
+  overrideUserId?: string,
+  overrideJobId?: string
 ): Promise<boolean> {
   if (!isSupabaseConfigured || !supabaseClient) {
     return false;
   }
 
-  const userId = await getAuthenticatedUserId();
+  const userId = overrideUserId || (await getAuthenticatedUserId());
   if (!userId) {
     return false;
   }
 
   try {
-    // Ensure job is upserted first under current user_id
-    const jobId = await syncJobToSupabase(job, { force: true });
+    const jobId = overrideJobId || (await syncJobToSupabase(job, { force: true }, userId));
     if (!jobId) return false;
 
     const now = new Date().toISOString();
 
-    const payload = {
+    const payload = sanitizePayload({
       user_id: userId,
       job_id: jobId,
-      target_title: tailoredResume.targetTitle || job.title,
-      headline: tailoredResume.headline,
-      professional_summary: tailoredResume.professionalSummary,
+      target_title: tailoredResume.targetTitle || job.title || '',
+      headline: tailoredResume.headline || null,
+      professional_summary: tailoredResume.professionalSummary || null,
       priority_skills: tailoredResume.prioritySkills || [],
       selected_experience: tailoredResume.selectedExperienceBullets || [],
       ats_keywords: tailoredResume.atsKeywords || {},
@@ -253,11 +366,15 @@ export async function syncTailoredResume(
       resume_language: tailoredResume.resumeLanguage || 'pt-BR',
       resume_text: JSON.stringify(tailoredResume),
       updated_at: now,
-    };
+    });
 
-    const { error } = await supabaseClient
-      .from('tailored_resumes')
-      .upsert(payload, { onConflict: 'user_id, job_id' });
+    const { error } = await withTimeout(
+      supabaseClient
+        .from('tailored_resumes')
+        .upsert(payload, { onConflict: 'user_id, job_id' }),
+      8000,
+      `upsert tailored resume ${job.title}`
+    );
 
     if (error) {
       console.error('[CloudSync] Error syncing tailored resume:', error.message);
@@ -275,63 +392,70 @@ export async function syncTailoredResume(
 }
 
 /**
- * Rule 10 & 21: Save source snapshot max once per source per session with user_id.
+ * Save source snapshot with user_id.
  */
-export async function syncSourceSnapshot(data: {
-  sourceName: string;
-  provider: string;
-  boardToken?: string;
-  windowDays?: number;
-  totalJobs: number;
-  brazilLatamJobs: number;
-  relevantJobs: number;
-  jobs85Plus: number;
-  jobs90Plus: number;
-  relevanceRate?: number;
-  highMatchRate?: number;
-  excellentMatchRate?: number;
-  yieldScore: number | null;
-  confidence: string;
-  currentPriority: number;
-  suggestedPriority: number | 'WATCH';
-}): Promise<boolean> {
+export async function syncSourceSnapshot(
+  data: {
+    sourceName: string;
+    provider: string;
+    boardToken?: string;
+    windowDays?: number;
+    totalJobs: number;
+    brazilLatamJobs: number;
+    relevantJobs: number;
+    jobs85Plus: number;
+    jobs90Plus: number;
+    relevanceRate?: number;
+    highMatchRate?: number;
+    excellentMatchRate?: number;
+    yieldScore: number | null;
+    confidence: string;
+    currentPriority: number | string;
+    suggestedPriority: number | string;
+  },
+  overrideUserId?: string
+): Promise<boolean> {
   if (!isSupabaseConfigured || !supabaseClient) {
     return false;
   }
 
-  const userId = await getAuthenticatedUserId();
+  const userId = overrideUserId || (await getAuthenticatedUserId());
   if (!userId) {
     return false;
   }
 
   const sessionKey = `${userId}_${data.sourceName}_${data.boardToken || 'default'}`;
   if (savedSnapshotsThisSession.has(sessionKey)) {
-    return true; // Already saved this session
+    return true;
   }
 
   try {
-    const payload = {
+    const payload = sanitizePayload({
       user_id: userId,
       source_name: data.sourceName,
       provider: data.provider,
       board_token: data.boardToken || null,
       window_days: data.windowDays || 30,
-      total_jobs: data.totalJobs,
-      brazil_latam_jobs: data.brazilLatamJobs,
-      relevant_jobs: data.relevantJobs,
-      jobs_85_plus: data.jobs85Plus,
-      jobs_90_plus: data.jobs90Plus,
+      total_jobs: data.totalJobs || 0,
+      brazil_latam_jobs: data.brazilLatamJobs || 0,
+      relevant_jobs: data.relevantJobs || 0,
+      jobs_85_plus: data.jobs85Plus || 0,
+      jobs_90_plus: data.jobs90Plus || 0,
       relevance_rate: data.relevanceRate ?? (data.brazilLatamJobs > 0 ? Math.round((data.relevantJobs / data.brazilLatamJobs) * 100) : 0),
       high_match_rate: data.highMatchRate ?? (data.brazilLatamJobs > 0 ? Math.round((data.jobs85Plus / data.brazilLatamJobs) * 100) : 0),
       excellent_match_rate: data.excellentMatchRate ?? (data.brazilLatamJobs > 0 ? Math.round((data.jobs90Plus / data.brazilLatamJobs) * 100) : 0),
-      yield_score: data.yieldScore,
-      confidence: data.confidence,
-      current_priority: String(data.currentPriority),
-      suggested_priority: String(data.suggestedPriority),
+      yield_score: data.yieldScore ?? null,
+      confidence: data.confidence || 'LOW',
+      current_priority: String(data.currentPriority ?? '1'),
+      suggested_priority: String(data.suggestedPriority ?? '1'),
       captured_at: new Date().toISOString(),
-    };
+    });
 
-    const { error } = await supabaseClient.from('source_snapshots').insert(payload);
+    const { error } = await withTimeout(
+      supabaseClient.from('source_snapshots').insert(payload),
+      8000,
+      `insert snapshot ${data.sourceName}`
+    );
 
     if (error) {
       console.error('[CloudSync] Error saving source snapshot:', error.message);
@@ -350,7 +474,7 @@ export async function syncSourceSnapshot(data: {
 }
 
 /**
- * Rule 15: Restore data from Supabase to local state for authenticated user.
+ * Restore data from Supabase to local state for authenticated user.
  */
 export async function restoreCloudData(): Promise<{
   restoredJobs: number;
@@ -369,22 +493,30 @@ export async function restoreCloudData(): Promise<{
   }
 
   try {
-    // 1. Fetch jobs owned by user
-    const { data: jobs, error: jErr } = await supabaseClient.from('jobs').select('*');
+    const { data: jobs, error: jErr } = await withTimeout(
+      supabaseClient.from('jobs').select('*'),
+      8000,
+      'fetch jobs'
+    );
     if (jErr) throw jErr;
 
-    // 2. Fetch applications owned by user
-    const { data: apps, error: aErr } = await supabaseClient.from('applications').select('*');
+    const { data: apps, error: aErr } = await withTimeout(
+      supabaseClient.from('applications').select('*'),
+      8000,
+      'fetch applications'
+    );
     if (aErr) throw aErr;
 
-    // 3. Fetch tailored resumes owned by user
-    const { data: resumes, error: rErr } = await supabaseClient.from('tailored_resumes').select('*');
+    const { data: resumes, error: rErr } = await withTimeout(
+      supabaseClient.from('tailored_resumes').select('*'),
+      8000,
+      'fetch tailored_resumes'
+    );
     if (rErr) throw rErr;
 
     const appliedMap: Record<string, ApplicationStatus> = {};
     const tailoredResumesMap: Record<string, TailoredResume> = {};
 
-    // Map job UUID -> external_key or URL
     const jobIdToKeyMap = new Map<string, string>();
     (jobs || []).forEach((j) => {
       jobIdToKeyMap.set(j.id, j.external_key);
@@ -438,53 +570,367 @@ export async function restoreCloudData(): Promise<{
 }
 
 /**
- * Rule 14: Migrate local storage data to Supabase under authenticated user.
+ * Audit & step-by-step migration of local data to Supabase under current auth.uid().
  */
 export async function migrateLocalDataToSupabase(
   appliedMap: Record<string, ApplicationStatus>,
   tailoredResumesMap: Record<string, TailoredResume>,
-  jobList: JobWithAnalysis[]
-): Promise<{ migratedJobs: number; migratedApps: number; migratedResumes: number }> {
+  jobList: JobWithAnalysis[],
+  onProgress?: (result: DetailedMigrationResult) => void
+): Promise<DetailedMigrationResult> {
+  const steps: StepDiagnostic[] = [
+    { id: 'AUTH', name: 'Sessão autenticada', status: 'PENDING', foundCount: 0, syncedCount: 0 },
+    { id: 'JOBS', name: 'Jobs', status: 'PENDING', foundCount: 0, syncedCount: 0 },
+    { id: 'APPLICATIONS', name: 'Applications', status: 'PENDING', foundCount: 0, syncedCount: 0 },
+    { id: 'RESUMES', name: 'Tailored Resumes', status: 'PENDING', foundCount: 0, syncedCount: 0 },
+    { id: 'SNAPSHOTS', name: 'Source Snapshots', status: 'PENDING', foundCount: 0, syncedCount: 0 },
+    { id: 'COMPLETE', name: 'Sincronização concluída', status: 'PENDING', foundCount: 0, syncedCount: 0 },
+  ];
+
+  const result: DetailedMigrationResult = {
+    status: 'SUCCESS',
+    userAuthOk: false,
+    summary: {
+      jobsFound: 0,
+      jobsSynced: 0,
+      appsFound: 0,
+      appsSynced: 0,
+      resumesFound: 0,
+      resumesSynced: 0,
+      snapshotsFound: 0,
+      snapshotsSynced: 0,
+    },
+    steps,
+  };
+
+  const updateStep = (
+    stepId: StepDiagnostic['id'],
+    patch: Partial<StepDiagnostic>
+  ) => {
+    const idx = steps.findIndex((s) => s.id === stepId);
+    if (idx !== -1) {
+      steps[idx] = { ...steps[idx], ...patch };
+    }
+    if (onProgress) {
+      onProgress({ ...result, steps: [...steps] });
+    }
+  };
+
   if (!isSupabaseConfigured || !supabaseClient) {
-    return { migratedJobs: 0, migratedApps: 0, migratedResumes: 0 };
+    updateStep('AUTH', {
+      status: 'ERROR',
+      message: 'Supabase não está configurado. Verifique a URL e a Publishable Key.',
+      error: { message: 'Cliente Supabase não inicializado' },
+    });
+    result.status = 'ERROR';
+    result.failedStepName = 'Sessão autenticada';
+    result.error = { message: 'Cliente Supabase não inicializado' };
+    return result;
   }
 
-  const userId = await getAuthenticatedUserId();
-  if (!userId) {
-    console.warn('[CloudSync] Migration blocked: User not authenticated.');
-    return { migratedJobs: 0, migratedApps: 0, migratedResumes: 0 };
+  let activeUser: any = null;
+
+  // STEP 1: AUTH
+  try {
+    updateStep('AUTH', { status: 'IN_PROGRESS' });
+    const { data: { user }, error: authErr } = await withTimeout(
+      supabaseClient.auth.getUser(),
+      8000,
+      'auth.getUser'
+    );
+
+    if (authErr || !user || !user.id) {
+      const errDetails = extractSupabaseError(authErr || 'Nenhum usuário autenticado encontrado');
+      updateStep('AUTH', {
+        status: 'ERROR',
+        message: `Sessão inválida ou não autenticada: ${errDetails.message}`,
+        error: errDetails,
+      });
+      result.status = 'ERROR';
+      result.failedStepName = 'Sessão autenticada';
+      result.error = errDetails;
+      return result;
+    }
+
+    activeUser = user;
+    result.userAuthOk = true;
+    result.userId = user.id;
+    result.userEmail = user.email || undefined;
+
+    updateStep('AUTH', {
+      status: 'OK',
+      foundCount: 1,
+      syncedCount: 1,
+      message: `OK (User ID: ${user.id})`,
+    });
+  } catch (err: any) {
+    const isTimeout = err.code === 'TIMEOUT' || String(err).includes('TIMEOUT');
+    const errDetails = extractSupabaseError(err);
+    updateStep('AUTH', {
+      status: isTimeout ? 'TIMEOUT' : 'ERROR',
+      message: isTimeout ? 'TIMEOUT NA ETAPA: Sessão autenticada' : `ERRO NA ETAPA: Sessão autenticada (${errDetails.message})`,
+      error: errDetails,
+    });
+    result.status = isTimeout ? 'TIMEOUT' : 'ERROR';
+    result.failedStepName = 'Sessão autenticada';
+    result.error = errDetails;
+    return result;
   }
 
-  let migratedJobs = 0;
-  let migratedApps = 0;
-  let migratedResumes = 0;
+  const userId = activeUser.id;
 
-  for (const job of jobList) {
-    const extKey = generateExternalKey(job);
-    const localStatus = appliedMap[job.url] || appliedMap[extKey] || job.status;
-    const localResume = tailoredResumesMap[job.url] || tailoredResumesMap[extKey];
+  // Map to store newly generated UUIDs: key -> jobId
+  const keyToJobIdMap = new Map<string, string>();
 
-    // Sync job if high score or has status/resume
-    if ((job.analysis?.score ?? 0) >= 75 || (localStatus && localStatus !== 'NEW') || localResume) {
-      const jobId = await syncJobToSupabase({ ...job, status: localStatus }, { force: true });
+  // STEP 2: JOBS
+  try {
+    updateStep('JOBS', { status: 'IN_PROGRESS' });
+
+    // Filter jobs to migrate
+    const eligibleJobs = jobList.filter((job) => {
+      const extKey = generateExternalKey(job);
+      const localStatus = appliedMap[job.url] || appliedMap[extKey] || job.status;
+      const localResume = tailoredResumesMap[job.url] || tailoredResumesMap[extKey];
+      return (job.analysis?.score ?? 0) >= 75 || (localStatus && localStatus !== 'NEW') || Boolean(localResume);
+    });
+
+    // If no eligible jobs by filter, take all local jobs if present
+    const jobsToMigrate = eligibleJobs.length > 0 ? eligibleJobs : jobList;
+    result.summary.jobsFound = jobsToMigrate.length;
+
+    updateStep('JOBS', { foundCount: jobsToMigrate.length, syncedCount: 0 });
+
+    let syncedJobs = 0;
+    for (const job of jobsToMigrate) {
+      const extKey = generateExternalKey(job);
+      const jobId = await syncJobToSupabase(job, { force: true }, userId);
       if (jobId) {
-        migratedJobs++;
+        syncedJobs++;
+        keyToJobIdMap.set(extKey, jobId);
+        if (job.url) keyToJobIdMap.set(job.url, jobId);
+      }
+    }
 
-        if (localStatus && localStatus !== 'NEW') {
-          const success = await syncApplicationStatus({ ...job, status: localStatus }, localStatus);
-          if (success) migratedApps++;
-        }
+    result.summary.jobsSynced = syncedJobs;
+    updateStep('JOBS', {
+      status: 'OK',
+      syncedCount: syncedJobs,
+      message: `${syncedJobs} de ${jobsToMigrate.length} vagas sincronizadas com sucesso`,
+    });
+  } catch (err: any) {
+    const isTimeout = err.code === 'TIMEOUT' || String(err).includes('TIMEOUT');
+    const errDetails = extractSupabaseError(err);
+    updateStep('JOBS', {
+      status: isTimeout ? 'TIMEOUT' : 'ERROR',
+      message: isTimeout ? 'TIMEOUT NA ETAPA: Jobs' : `ERRO NA ETAPA: Jobs (${errDetails.message})`,
+      error: errDetails,
+    });
+    result.status = isTimeout ? 'TIMEOUT' : 'ERROR';
+    result.failedStepName = 'Jobs';
+    result.error = errDetails;
+    return result;
+  }
 
-        if (localResume) {
-          const success = await syncTailoredResume(job, localResume);
-          if (success) migratedResumes++;
+  // STEP 3: APPLICATIONS
+  try {
+    updateStep('APPLICATIONS', { status: 'IN_PROGRESS' });
+
+    // Build list of applications to sync
+    const appEntries: { job: JobWithAnalysis; status: ApplicationStatus; extKey: string; url: string }[] = [];
+
+    // Collect from appliedMap
+    for (const [key, status] of Object.entries(appliedMap)) {
+      if (status && status !== 'NEW') {
+        const matchingJob = jobList.find((j) => j.url === key || generateExternalKey(j) === key);
+        if (matchingJob) {
+          appEntries.push({
+            job: matchingJob,
+            status,
+            extKey: generateExternalKey(matchingJob),
+            url: matchingJob.url || '',
+          });
         }
       }
     }
+
+    // Also collect from jobs that have status !== 'NEW'
+    for (const job of jobList) {
+      if (job.status && job.status !== 'NEW') {
+        const extKey = generateExternalKey(job);
+        const alreadyIn = appEntries.some((e) => e.extKey === extKey || (job.url && e.url === job.url));
+        if (!alreadyIn) {
+          appEntries.push({
+            job,
+            status: job.status,
+            extKey,
+            url: job.url || '',
+          });
+        }
+      }
+    }
+
+    result.summary.appsFound = appEntries.length;
+    updateStep('APPLICATIONS', { foundCount: appEntries.length, syncedCount: 0 });
+
+    let syncedApps = 0;
+    for (const entry of appEntries) {
+      const existingJobId = keyToJobIdMap.get(entry.extKey) || keyToJobIdMap.get(entry.url);
+      const success = await syncApplicationStatus(entry.job, entry.status, undefined, userId, existingJobId);
+      if (success) {
+        syncedApps++;
+      }
+    }
+
+    result.summary.appsSynced = syncedApps;
+    updateStep('APPLICATIONS', {
+      status: 'OK',
+      syncedCount: syncedApps,
+      message: `${syncedApps} de ${appEntries.length} candidaturas sincronizadas`,
+    });
+  } catch (err: any) {
+    const isTimeout = err.code === 'TIMEOUT' || String(err).includes('TIMEOUT');
+    const errDetails = extractSupabaseError(err);
+    updateStep('APPLICATIONS', {
+      status: isTimeout ? 'TIMEOUT' : 'ERROR',
+      message: isTimeout ? 'TIMEOUT NA ETAPA: Applications' : `ERRO NA ETAPA: Applications (${errDetails.message})`,
+      error: errDetails,
+    });
+    result.status = isTimeout ? 'TIMEOUT' : 'ERROR';
+    result.failedStepName = 'Applications';
+    result.error = errDetails;
+    return result;
   }
 
+  // STEP 4: TAILORED RESUMES
+  try {
+    updateStep('RESUMES', { status: 'IN_PROGRESS' });
+
+    const resumeEntries: { job: JobWithAnalysis; resume: TailoredResume; extKey: string; url: string }[] = [];
+
+    for (const [key, resume] of Object.entries(tailoredResumesMap)) {
+      if (resume) {
+        const matchingJob = jobList.find((j) => j.url === key || generateExternalKey(j) === key);
+        if (matchingJob) {
+          resumeEntries.push({
+            job: matchingJob,
+            resume,
+            extKey: generateExternalKey(matchingJob),
+            url: matchingJob.url || '',
+          });
+        }
+      }
+    }
+
+    result.summary.resumesFound = resumeEntries.length;
+    updateStep('RESUMES', { foundCount: resumeEntries.length, syncedCount: 0 });
+
+    let syncedResumes = 0;
+    for (const entry of resumeEntries) {
+      const existingJobId = keyToJobIdMap.get(entry.extKey) || keyToJobIdMap.get(entry.url);
+      const success = await syncTailoredResume(entry.job, entry.resume, userId, existingJobId);
+      if (success) {
+        syncedResumes++;
+      }
+    }
+
+    result.summary.resumesSynced = syncedResumes;
+    updateStep('RESUMES', {
+      status: 'OK',
+      syncedCount: syncedResumes,
+      message: `${syncedResumes} de ${resumeEntries.length} currículos customizados sincronizados`,
+    });
+  } catch (err: any) {
+    const isTimeout = err.code === 'TIMEOUT' || String(err).includes('TIMEOUT');
+    const errDetails = extractSupabaseError(err);
+    updateStep('RESUMES', {
+      status: isTimeout ? 'TIMEOUT' : 'ERROR',
+      message: isTimeout ? 'TIMEOUT NA ETAPA: Tailored Resumes' : `ERRO NA ETAPA: Tailored Resumes (${errDetails.message})`,
+      error: errDetails,
+    });
+    result.status = isTimeout ? 'TIMEOUT' : 'ERROR';
+    result.failedStepName = 'Tailored Resumes';
+    result.error = errDetails;
+    return result;
+  }
+
+  // STEP 5: SOURCE SNAPSHOTS
+  try {
+    updateStep('SNAPSHOTS', { status: 'IN_PROGRESS' });
+
+    let localBoards: any[] = [];
+    try {
+      const raw = localStorage.getItem(LOCAL_STORAGE_BOARDS_KEY);
+      if (raw) localBoards = JSON.parse(raw);
+    } catch {
+      // fallback
+    }
+    if (!localBoards || localBoards.length === 0) {
+      localBoards = DEFAULT_GREENHOUSE_BOARDS;
+    }
+
+    result.summary.snapshotsFound = localBoards.length;
+    updateStep('SNAPSHOTS', { foundCount: localBoards.length, syncedCount: 0 });
+
+    let syncedSnaps = 0;
+    for (const board of localBoards) {
+      const m = board.metrics || {
+        totalJobs: board.lastJobCount || 0,
+        brazilJobs: 0,
+        relevantJobs: 0,
+        score85Plus: 0,
+        score90Plus: 0,
+      };
+
+      const success = await syncSourceSnapshot(
+        {
+          sourceName: board.company || 'Greenhouse Board',
+          provider: board.provider || 'greenhouse',
+          boardToken: board.boardToken,
+          totalJobs: m.totalJobs || 0,
+          brazilLatamJobs: m.brazilJobs || 0,
+          relevantJobs: m.relevantJobs || 0,
+          jobs85Plus: m.score85Plus || 0,
+          jobs90Plus: m.score90Plus || 0,
+          yieldScore: board.yieldScore ?? null,
+          confidence: board.confidence || 'LOW',
+          currentPriority: board.priority || 1,
+          suggestedPriority: board.suggestedPriority || 1,
+        },
+        userId
+      );
+
+      if (success) syncedSnaps++;
+    }
+
+    result.summary.snapshotsSynced = syncedSnaps;
+    updateStep('SNAPSHOTS', {
+      status: 'OK',
+      syncedCount: syncedSnaps,
+      message: `${syncedSnaps} de ${localBoards.length} snapshots de rendimento registrados`,
+    });
+  } catch (err: any) {
+    const isTimeout = err.code === 'TIMEOUT' || String(err).includes('TIMEOUT');
+    const errDetails = extractSupabaseError(err);
+    updateStep('SNAPSHOTS', {
+      status: isTimeout ? 'TIMEOUT' : 'ERROR',
+      message: isTimeout ? 'TIMEOUT NA ETAPA: Source Snapshots' : `ERRO NA ETAPA: Source Snapshots (${errDetails.message})`,
+      error: errDetails,
+    });
+    result.status = isTimeout ? 'TIMEOUT' : 'ERROR';
+    result.failedStepName = 'Source Snapshots';
+    result.error = errDetails;
+    return result;
+  }
+
+  // STEP 6: COMPLETE
+  updateStep('COMPLETE', {
+    status: 'OK',
+    message: 'Sincronização concluída com sucesso no Supabase RLS!',
+  });
+
   lastSyncTimestamp = new Date().toLocaleTimeString('pt-BR');
-  return { migratedJobs, migratedApps, migratedResumes };
+  result.status = 'SUCCESS';
+  return result;
 }
 
 /**
@@ -503,15 +949,35 @@ export async function getCloudSyncDiagnostics(): Promise<CloudSyncDiagnostics> {
 
   if (configured && supabaseClient) {
     try {
-      const { data: { user } } = await supabaseClient.auth.getUser();
+      const { data: { user } } = await withTimeout(
+        supabaseClient.auth.getUser(),
+        5000,
+        'auth.getUser'
+      );
       if (user) {
         authenticated = true;
         userEmail = user.email || null;
 
-        const { count: jCount, error: jErr } = await supabaseClient.from('jobs').select('*', { count: 'exact', head: true });
-        const { count: aCount } = await supabaseClient.from('applications').select('*', { count: 'exact', head: true });
-        const { count: rCount } = await supabaseClient.from('tailored_resumes').select('*', { count: 'exact', head: true });
-        const { count: sCount } = await supabaseClient.from('source_snapshots').select('*', { count: 'exact', head: true });
+        const { count: jCount, error: jErr } = await withTimeout(
+          supabaseClient.from('jobs').select('*', { count: 'exact', head: true }),
+          5000,
+          'count jobs'
+        );
+        const { count: aCount } = await withTimeout(
+          supabaseClient.from('applications').select('*', { count: 'exact', head: true }),
+          5000,
+          'count applications'
+        );
+        const { count: rCount } = await withTimeout(
+          supabaseClient.from('tailored_resumes').select('*', { count: 'exact', head: true }),
+          5000,
+          'count tailored_resumes'
+        );
+        const { count: sCount } = await withTimeout(
+          supabaseClient.from('source_snapshots').select('*', { count: 'exact', head: true }),
+          5000,
+          'count source_snapshots'
+        );
 
         if (!jErr) {
           connected = true;
