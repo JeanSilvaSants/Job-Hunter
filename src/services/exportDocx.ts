@@ -26,6 +26,7 @@ export function sanitizeFilename(str: string): string {
  * Generates an ATS-friendly .docx document for candidate resume.
  */
 export async function generateDocxBlob(resume: FullResumeData): Promise<Blob> {
+  const isEn = resume.resumeLanguage === 'en';
   const children: Paragraph[] = [];
 
   // Helper for section headings
@@ -84,7 +85,7 @@ export async function generateDocxBlob(resume: FullResumeData): Promise<Blob> {
       spacing: { after: 200 },
       children: [
         new TextRun({
-          text: `Contato: ${resume.phone} | ${resume.email} | ${resume.linkedin} | ${resume.location}`,
+          text: `${isEn ? 'Contact' : 'Contato'}: ${resume.phone} | ${resume.email} | ${resume.linkedin} | ${resume.location}`,
           size: 19, // 9.5pt
           font: 'Arial',
           color: '475569',
@@ -93,8 +94,8 @@ export async function generateDocxBlob(resume: FullResumeData): Promise<Blob> {
     })
   );
 
-  // RESUMO PROFISSIONAL
-  children.push(createSectionHeading('Resumo Profissional'));
+  // RESUMO PROFISSIONAL / PROFESSIONAL SUMMARY
+  children.push(createSectionHeading(isEn ? 'Professional Summary' : 'Resumo Profissional'));
   children.push(
     new Paragraph({
       spacing: { after: 180 },
@@ -109,13 +110,13 @@ export async function generateDocxBlob(resume: FullResumeData): Promise<Blob> {
     })
   );
 
-  // COMPETÊNCIAS
-  children.push(createSectionHeading('Competências & Ferramentas'));
+  // COMPETÊNCIAS / SKILLS & TOOLS
+  children.push(createSectionHeading(isEn ? 'Skills & Tools' : 'Competências & Ferramentas'));
   children.push(
     new Paragraph({
       spacing: { after: 60 },
       children: [
-        new TextRun({ text: 'Competências Prioritárias: ', bold: true, size: 20, font: 'Arial' }),
+        new TextRun({ text: isEn ? 'Priority Skills: ' : 'Competências Prioritárias: ', bold: true, size: 20, font: 'Arial' }),
         new TextRun({ text: resume.prioritySkills.join(' • '), size: 20, font: 'Arial' }),
       ],
     })
@@ -124,7 +125,7 @@ export async function generateDocxBlob(resume: FullResumeData): Promise<Blob> {
     new Paragraph({
       spacing: { after: 60 },
       children: [
-        new TextRun({ text: 'Ferramentas & Sistemas: ', bold: true, size: 20, font: 'Arial' }),
+        new TextRun({ text: isEn ? 'Tools & Systems: ' : 'Ferramentas & Sistemas: ', bold: true, size: 20, font: 'Arial' }),
         new TextRun({ text: resume.tools.join(', '), size: 20, font: 'Arial' }),
       ],
     })
@@ -133,14 +134,14 @@ export async function generateDocxBlob(resume: FullResumeData): Promise<Blob> {
     new Paragraph({
       spacing: { after: 180 },
       children: [
-        new TextRun({ text: 'Idiomas: ', bold: true, size: 20, font: 'Arial' }),
+        new TextRun({ text: isEn ? 'Languages: ' : 'Idiomas: ', bold: true, size: 20, font: 'Arial' }),
         new TextRun({ text: resume.languages.map((l) => `${l.language} (${l.level})`).join(', '), size: 20, font: 'Arial' }),
       ],
     })
   );
 
-  // EXPERIÊNCIA PROFISSIONAL
-  children.push(createSectionHeading('Experiência Profissional'));
+  // EXPERIÊNCIA PROFISSIONAL / PROFESSIONAL EXPERIENCE
+  children.push(createSectionHeading(isEn ? 'Professional Experience' : 'Experiência Profissional'));
 
   resume.experiences.forEach((exp) => {
     children.push(
@@ -159,7 +160,7 @@ export async function generateDocxBlob(resume: FullResumeData): Promise<Blob> {
     );
 
     exp.roles.forEach((role) => {
-      const formattedPeriod = formatCompactPeriod(role.period);
+      const formattedPeriod = formatCompactPeriod(role.period, isEn);
       const isLongHeader = role.title.length + formattedPeriod.length > 55;
 
       if (isLongHeader) {
@@ -234,8 +235,8 @@ export async function generateDocxBlob(resume: FullResumeData): Promise<Blob> {
     });
   });
 
-  // FORMAÇÃO ACADÊMICA
-  children.push(createSectionHeading('Formação Acadêmica'));
+  // FORMAÇÃO ACADÊMICA / EDUCATION
+  children.push(createSectionHeading(isEn ? 'Education' : 'Formação Acadêmica'));
   resume.education.forEach((edu) => {
     children.push(
       new Paragraph({
@@ -258,8 +259,8 @@ export async function generateDocxBlob(resume: FullResumeData): Promise<Blob> {
     );
   });
 
-  // IDIOMAS
-  children.push(createSectionHeading('Idiomas'));
+  // IDIOMAS / LANGUAGES
+  children.push(createSectionHeading(isEn ? 'Languages' : 'Idiomas'));
   resume.languages.forEach((lang) => {
     children.push(
       new Paragraph({

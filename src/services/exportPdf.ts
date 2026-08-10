@@ -5,12 +5,13 @@ import { sanitizeFilename } from './exportDocx';
 
 /**
  * Formats a date range string into a compact month format.
- * Example: "Setembro de 2022 – Novembro de 2023" -> "Set 2022 – Nov 2023"
+ * Example (PT): "Setembro de 2022 – Novembro de 2023" -> "Set 2022 – Nov 2023"
+ * Example (EN): "Setembro de 2022 – Novembro de 2023" -> "Sep 2022 – Nov 2023"
  */
-export function formatCompactPeriod(period: string): string {
+export function formatCompactPeriod(period: string, isEn: boolean = false): string {
   if (!period) return '';
 
-  const monthMap: Record<string, string> = {
+  const ptMonthMap: Record<string, string> = {
     janeiro: 'Jan',
     fevereiro: 'Fev',
     março: 'Mar',
@@ -24,6 +25,22 @@ export function formatCompactPeriod(period: string): string {
     outubro: 'Out',
     novembro: 'Nov',
     dezembro: 'Dez',
+  };
+
+  const enMonthMap: Record<string, string> = {
+    janeiro: 'Jan',
+    fevereiro: 'Feb',
+    março: 'Mar',
+    marco: 'Mar',
+    abril: 'Apr',
+    maio: 'May',
+    junho: 'Jun',
+    julho: 'Jul',
+    agosto: 'Aug',
+    setembro: 'Sep',
+    outubro: 'Oct',
+    novembro: 'Nov',
+    dezembro: 'Dec',
     january: 'Jan',
     february: 'Feb',
     march: 'Mar',
@@ -38,16 +55,23 @@ export function formatCompactPeriod(period: string): string {
     december: 'Dec',
   };
 
+  const monthMap = isEn ? enMonthMap : ptMonthMap;
+
   let formatted = period;
 
   // Remove " de " between month word and 4-digit year (e.g. "Setembro de 2022" -> "Setembro 2022")
   formatted = formatted.replace(/([a-zA-ZçÇáéíóúÁÉÍÓÚ]+)\s+de\s+(\d{4})/gi, '$1 $2');
 
-  // Abbreviate month names to 3 letters
+  // Abbreviate month names
   Object.entries(monthMap).forEach(([full, abbr]) => {
     const regex = new RegExp(`\\b${full}\\b`, 'gi');
     formatted = formatted.replace(regex, abbr);
   });
+
+  // Handle "Presente" / "Present"
+  if (isEn) {
+    formatted = formatted.replace(/\bpresente\b/gi, 'Present');
+  }
 
   // Normalize hyphen / dash separators
   formatted = formatted.replace(/\s*–\s*/g, ' – ').replace(/\s*-\s*/g, ' – ');
@@ -59,6 +83,8 @@ export function formatCompactPeriod(period: string): string {
  * Generates an ATS-friendly .pdf document with vector text and precise line wrapping.
  */
 export async function generatePdfBlob(resume: FullResumeData): Promise<Blob> {
+  const isEn = resume.resumeLanguage === 'en';
+
   const doc = new jsPDF({
     orientation: 'portrait',
     unit: 'mm',
@@ -113,13 +139,13 @@ export async function generatePdfBlob(resume: FullResumeData): Promise<Blob> {
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(8.5);
   doc.setTextColor(71, 85, 105); // Slate-600
-  const contactText = `Contato: ${resume.phone} | ${resume.email} | ${resume.linkedin} | ${resume.location}`;
+  const contactText = `${isEn ? 'Contact' : 'Contato'}: ${resume.phone} | ${resume.email} | ${resume.linkedin} | ${resume.location}`;
   const contactLines = doc.splitTextToSize(contactText, contentWidth);
   doc.text(contactLines, marginLeft, y);
   y += contactLines.length * 4 + 4;
 
-  // RESUMO PROFISSIONAL
-  addSectionHeading('Resumo Profissional');
+  // RESUMO PROFISSIONAL / PROFESSIONAL SUMMARY
+  addSectionHeading(isEn ? 'Professional Summary' : 'Resumo Profissional');
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(9);
   doc.setTextColor(51, 65, 85); // Slate-700
@@ -128,30 +154,30 @@ export async function generatePdfBlob(resume: FullResumeData): Promise<Blob> {
   doc.text(summaryLines, marginLeft, y);
   y += summaryLines.length * 4.2 + 5;
 
-  // COMPETÊNCIAS & FERRAMENTAS
-  addSectionHeading('Competências & Ferramentas');
+  // COMPETÊNCIAS & FERRAMENTAS / SKILLS & TOOLS
+  addSectionHeading(isEn ? 'Skills & Tools' : 'Competências & Ferramentas');
   doc.setFontSize(8.5);
 
-  const skillsText = `Competências Prioritárias: ${resume.prioritySkills.join(' • ')}`;
+  const skillsText = `${isEn ? 'Priority Skills' : 'Competências Prioritárias'}: ${resume.prioritySkills.join(' • ')}`;
   const skillsLines = doc.splitTextToSize(skillsText, contentWidth);
   checkPageBreak(skillsLines.length * 3.8);
   doc.text(skillsLines, marginLeft, y);
   y += skillsLines.length * 3.8 + 2;
 
-  const toolsText = `Ferramentas & Sistemas: ${resume.tools.join(', ')}`;
+  const toolsText = `${isEn ? 'Tools & Systems' : 'Ferramentas & Sistemas'}: ${resume.tools.join(', ')}`;
   const toolsLines = doc.splitTextToSize(toolsText, contentWidth);
   checkPageBreak(toolsLines.length * 3.8);
   doc.text(toolsLines, marginLeft, y);
   y += toolsLines.length * 3.8 + 2;
 
-  const langsText = `Idiomas: ${resume.languages.map((l) => `${l.language} (${l.level})`).join(', ')}`;
+  const langsText = `${isEn ? 'Languages' : 'Idiomas'}: ${resume.languages.map((l) => `${l.language} (${l.level})`).join(', ')}`;
   const langsLines = doc.splitTextToSize(langsText, contentWidth);
   checkPageBreak(langsLines.length * 3.8);
   doc.text(langsLines, marginLeft, y);
   y += langsLines.length * 3.8 + 5;
 
-  // EXPERIÊNCIA PROFISSIONAL
-  addSectionHeading('Experiência Profissional');
+  // EXPERIÊNCIA PROFISSIONAL / PROFESSIONAL EXPERIENCE
+  addSectionHeading(isEn ? 'Professional Experience' : 'Experiência Profissional');
 
   resume.experiences.forEach((exp) => {
     // Check space for Company name + first role header + at least 1 bullet
@@ -166,7 +192,7 @@ export async function generatePdfBlob(resume: FullResumeData): Promise<Blob> {
     y += companyLines.length * 4.5 + 1.5;
 
     exp.roles.forEach((role) => {
-      const formattedPeriod = formatCompactPeriod(role.period);
+      const formattedPeriod = formatCompactPeriod(role.period, isEn);
 
       // Measure width of role title and date
       doc.setFont('helvetica', 'bold');
@@ -241,8 +267,8 @@ export async function generatePdfBlob(resume: FullResumeData): Promise<Blob> {
     y += 2; // Spacing after company
   });
 
-  // FORMAÇÃO ACADÊMICA
-  addSectionHeading('Formação Acadêmica');
+  // FORMAÇÃO ACADÊMICA / EDUCATION
+  addSectionHeading(isEn ? 'Education' : 'Formação Acadêmica');
   doc.setFontSize(8.5);
   doc.setTextColor(51, 65, 85);
 
@@ -256,8 +282,8 @@ export async function generatePdfBlob(resume: FullResumeData): Promise<Blob> {
 
   y += 4;
 
-  // IDIOMAS
-  addSectionHeading('Idiomas');
+  // IDIOMAS / LANGUAGES
+  addSectionHeading(isEn ? 'Languages' : 'Idiomas');
   doc.setFontSize(8.5);
   resume.languages.forEach((lang) => {
     const lText = `•  ${lang.language}: ${lang.level}`;

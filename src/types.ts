@@ -1,6 +1,7 @@
 import { GeoCategory } from './services/geoClassifier';
+import { ResumeLanguage } from './services/resumeLanguageDetector';
 
-export type { GeoCategory };
+export type { GeoCategory, ResumeLanguage };
 
 export interface Role {
   title: string;
@@ -66,6 +67,7 @@ export interface Job {
   sources?: string[];
   geoCategory?: GeoCategory;
   status?: ApplicationStatus;
+  resumeLanguageOverride?: 'auto' | 'pt-BR' | 'en';
 }
 
 export interface ScoreBreakdown {

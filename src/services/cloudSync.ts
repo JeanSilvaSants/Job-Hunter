@@ -231,6 +231,7 @@ export async function syncTailoredResume(
       missing_keywords: tailoredResume.atsKeywords?.missing || [],
       audit_notes: tailoredResume.notes || [],
       ats_coverage: tailoredResume.atsCoverageScore || 0,
+      resume_language: tailoredResume.resumeLanguage || 'pt-BR',
       resume_text: JSON.stringify(tailoredResume),
       updated_at: now,
     };
@@ -385,6 +386,7 @@ export async function restoreCloudData(): Promise<{
           tailoredResumesMap[key] = JSON.parse(res.resume_text);
         } catch {
           tailoredResumesMap[key] = {
+            resumeLanguage: res.resume_language || 'pt-BR',
             targetTitle: res.target_title || '',
             headline: res.headline || '',
             professionalSummary: res.professional_summary || '',

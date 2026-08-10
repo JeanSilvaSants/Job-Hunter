@@ -1,5 +1,7 @@
 import { UserProfile } from '../types';
 import { TailoredResume } from './resume';
+import { ResumeLanguage } from './resumeLanguageDetector';
+import { getUserProfileByLanguage } from '../data/profile';
 
 export interface FullResumeRole {
   title: string;
@@ -13,6 +15,7 @@ export interface FullResumeCompany {
 }
 
 export interface FullResumeData {
+  resumeLanguage: ResumeLanguage;
   name: string;
   headline: string;
   phone: string;
@@ -32,7 +35,13 @@ export interface FullResumeData {
  * Preserves exact real companies, roles, dates, education, tools, and contact info.
  * Adapts experience highlights and priority skills based on tailoring.
  */
-export function buildFullResumeData(tailored: TailoredResume, profile: UserProfile): FullResumeData {
+export function buildFullResumeData(
+  tailored: TailoredResume,
+  profileOverride?: UserProfile
+): FullResumeData {
+  const lang = tailored.resumeLanguage || 'pt-BR';
+  const profile = profileOverride || getUserProfileByLanguage(lang);
+
   // Map tailored experience highlights back to structured profile companies/roles
   const tailoredHighlightsByCompanyRole = new Map<string, string[]>();
 
@@ -52,8 +61,14 @@ export function buildFullResumeData(tailored: TailoredResume, profile: UserProfi
           ? tailoredHighlights
           : masterRole.highlights.slice(0, 3);
 
+      let roleTitle = masterRole.title;
+      if (lang === 'en') {
+        if (masterExp.company === 'Prefeitura Municipal de Guariba') roleTitle = 'Human Resources Intern';
+        if (masterExp.company === 'Raízen') roleTitle = 'Administrative Assistant';
+      }
+
       return {
-        title: masterRole.title,
+        title: roleTitle,
         period: masterRole.period,
         highlights: finalHighlights,
       };
@@ -66,12 +81,13 @@ export function buildFullResumeData(tailored: TailoredResume, profile: UserProfi
   });
 
   return {
+    resumeLanguage: lang,
     name: profile.name.toUpperCase(),
     headline: tailored.headline,
     phone: profile.phone || '(16) 99761-0293',
     email: profile.email || 'eusoujeansilvasantos@gmail.com',
     linkedin: profile.linkedin || 'https://www.linkedin.com/in/jeansilvasantos/',
-    location: profile.location || 'São Paulo, SP - Brasil',
+    location: profile.location || (lang === 'en' ? 'São Paulo, SP - Brazil' : 'São Paulo, SP - Brasil'),
     professionalSummary: tailored.professionalSummary,
     prioritySkills: tailored.prioritySkills,
     experiences: structuredExperiences,
@@ -85,24 +101,27 @@ export function buildFullResumeData(tailored: TailoredResume, profile: UserProfi
  * Formats FullResumeData as clean plain text suitable for clipboard or ATS plain text parsing.
  */
 export function formatFullResumeAsText(resume: FullResumeData): string {
+  const isEn = resume.resumeLanguage === 'en';
   const lines: string[] = [];
 
   lines.push(resume.name);
   lines.push(resume.headline);
-  lines.push(`Contato: ${resume.phone} | ${resume.email} | ${resume.linkedin} | ${resume.location}`);
+  lines.push(
+    `${isEn ? 'Contact' : 'Contato'}: ${resume.phone} | ${resume.email} | ${resume.linkedin} | ${resume.location}`
+  );
   lines.push('');
 
-  lines.push('RESUMO PROFISSIONAL');
+  lines.push(isEn ? 'PROFESSIONAL SUMMARY' : 'RESUMO PROFISSIONAL');
   lines.push(resume.professionalSummary);
   lines.push('');
 
-  lines.push('COMPETÊNCIAS');
-  lines.push(`Competências Prioritárias: ${resume.prioritySkills.join(' • ')}`);
-  lines.push(`Ferramentas & Sistemas: ${resume.tools.join(', ')}`);
-  lines.push(`Idiomas: ${resume.languages.map((l) => `${l.language} (${l.level})`).join(', ')}`);
+  lines.push(isEn ? 'SKILLS & TOOLS' : 'COMPETÊNCIAS');
+  lines.push(`${isEn ? 'Priority Skills' : 'Competências Prioritárias'}: ${resume.prioritySkills.join(' • ')}`);
+  lines.push(`${isEn ? 'Tools & Systems' : 'Ferramentas & Sistemas'}: ${resume.tools.join(', ')}`);
+  lines.push(`${isEn ? 'Languages' : 'Idiomas'}: ${resume.languages.map((l) => `${l.language} (${l.level})`).join(', ')}`);
   lines.push('');
 
-  lines.push('EXPERIÊNCIA PROFISSIONAL');
+  lines.push(isEn ? 'PROFESSIONAL EXPERIENCE' : 'EXPERIÊNCIA PROFISSIONAL');
   lines.push('');
 
   resume.experiences.forEach((exp) => {
@@ -116,17 +135,13 @@ export function formatFullResumeAsText(resume: FullResumeData): string {
     });
   });
 
-  lines.push('FORMAÇÃO');
+  lines.push(isEn ? 'EDUCATION' : 'FORMAÇÃO');
   resume.education.forEach((edu) => {
     lines.push(`• ${edu.degree} — ${edu.institution} (${edu.status})`);
   });
   lines.push('');
 
-  lines.push('CERTIFICAÇÕES / FERRAMENTAS');
-  lines.push(resume.tools.join(' • '));
-  lines.push('');
-
-  lines.push('IDIOMAS');
+  lines.push(isEn ? 'LANGUAGES' : 'IDIOMAS');
   resume.languages.forEach((lang) => {
     lines.push(`• ${lang.language}: ${lang.level}`);
   });

@@ -1,6 +1,6 @@
 import { UserProfile } from '../types';
 
-export const userProfile: UserProfile = {
+export const userProfilePt: UserProfile = {
   name: 'Jean Silva',
   phone: '(16) 99761-0293',
   email: 'eusoujeansilvasantos@gmail.com',
@@ -177,3 +177,119 @@ export const userProfile: UserProfile = {
     'Pipedrive',
   ],
 };
+
+export const userProfileEn: UserProfile = {
+  ...userProfilePt,
+  location: 'São Paulo, SP - Brazil',
+  provenResults: [
+    'Reduced customer churn by 15% through onboarding optimization and proactive management of at-risk accounts.',
+    'Managed 5–15 B2B onboardings per month.',
+    'Managed active portfolio of 150+ corporate accounts.',
+    'Handled ~60 support tickets per day in English and Portuguese with C2 fluency.',
+  ],
+  mainExperiences: [
+    {
+      company: 'Logzz',
+      roles: [
+        {
+          title: 'Customer Onboarding & Success Analyst',
+          period: 'Abril de 2025 – Outubro de 2025',
+          highlights: [
+            'Reduced customer churn by 15% by optimizing onboarding processes and proactively engaging accounts showing adoption and engagement risk.',
+            'Managed 5–15 B2B onboardings per month through consultative discovery, customer-goal alignment and structured adoption strategies.',
+            'Monitored engagement, adoption and customer health indicators to identify risk and prioritize intervention.',
+            'Managed customer relationships across onboarding, adoption, retention and expansion.',
+            'Used customer and operational data to support segmentation, portfolio prioritization and Customer Success decisions.',
+          ],
+        },
+        {
+          title: 'Customer Experience Analyst',
+          period: 'Maio de 2024 – Abril de 2025',
+          highlights: [
+            'Mapped the customer journey and identified friction across critical touchpoints.',
+            'Analyzed customer feedback, usage data and behavioral patterns to support Product and Operations decisions.',
+            'Collaborated cross-functionally to improve customer-centered processes and reduce friction.',
+            'Proposed and implemented continuous process improvements to optimize customer journey and experience.',
+          ],
+        },
+        {
+          title: 'Customer Success Associate',
+          period: 'Outubro de 2023 – Maio de 2024',
+          highlights: [
+            'Managed a portfolio of 150+ customers across the customer lifecycle.',
+            'Monitored engagement, satisfaction, adoption and churn risk.',
+            'Identified upsell, expansion and product-adoption opportunities.',
+            'Acted as a strategic point of contact and supported resolution of complex customer issues.',
+          ],
+        },
+      ],
+    },
+    {
+      company: 'ChatSentry',
+      roles: [
+        {
+          title: 'Bilingual Customer Service Freelancer',
+          period: 'Outubro de 2025 – Janeiro de 2026',
+          highlights: [
+            'Handled customer interactions in Portuguese and English with C2 native-level fluency.',
+            'Handled approximately 60 customer support tickets per day in Portuguese and English.',
+            'Identified recurring customer issues by analyzing high-volume support interactions.',
+            'Supported service-process improvements by translating recurring requests into operational insights.',
+            'Proposed and executed direct improvements in customer service operational workflows.',
+          ],
+        },
+      ],
+    },
+    {
+      company: 'Prefeitura Municipal de Guariba',
+      roles: [
+        {
+          title: 'Human Resources Intern',
+          period: 'Setembro de 2022 – Novembro de 2023',
+          highlights: [
+            'Managed administrative documentation, spreadsheets and internal databases.',
+            'Supported organization and maintenance of HR records and administrative information.',
+            'Maintained internal management spreadsheets and Excel operational dashboards with guaranteed data integrity.',
+          ],
+        },
+      ],
+    },
+    {
+      company: 'Raízen',
+      roles: [
+        {
+          title: 'Administrative Assistant',
+          period: 'Agosto de 2019 – Outubro de 2021',
+          highlights: [
+            'Improved controls for technology supplies and supported operational continuity.',
+            'Standardized administrative processes and recurring internal workflows.',
+            'Supported internal controls, documentation and operational organization.',
+          ],
+        },
+      ],
+    },
+  ],
+  education: [
+    {
+      degree: "Bachelor's Degree in Business Administration",
+      institution: 'Universidade Paulista (UNIP)',
+      status: 'Completed',
+    },
+    {
+      degree: "Bachelor's Degree in International Relations",
+      institution: 'Universidade Anhembi Morumbi',
+      status: 'In Progress',
+    },
+  ],
+  languages: [
+    { language: 'Portuguese', level: 'Native' },
+    { language: 'English', level: 'C2 Proficient' },
+  ],
+};
+
+// Default export for backwards compatibility
+export const userProfile = userProfilePt;
+
+export function getUserProfileByLanguage(language: 'pt-BR' | 'en'): UserProfile {
+  return language === 'en' ? userProfileEn : userProfilePt;
+}

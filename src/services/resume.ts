@@ -1,5 +1,7 @@
 import { UserProfile, Job } from '../types';
 import { EVIDENCE_BULLET_BANK, BulletEntry } from '../data/bulletBank';
+import { detectResumeLanguage, ResumeLanguage } from './resumeLanguageDetector';
+import { getUserProfileByLanguage } from '../data/profile';
 
 export interface TailoredExperience {
   company: string;
@@ -20,6 +22,7 @@ export interface ATSKeywordsAnalysis {
 }
 
 export interface TailoredResume {
+  resumeLanguage: ResumeLanguage;
   targetTitle: string;
   headline: string;
   professionalSummary: string;
@@ -60,37 +63,70 @@ export const KEYWORD_SYNONYMS: Record<string, string[]> = {
  * Detects the dominant role family based on job title and job description.
  */
 export function detectRoleFamily(title: string, description: string): RoleFamily {
-  const combined = `${title} ${description}`.toLowerCase();
+  const titleLower = title.toLowerCase();
+  const descLower = description.toLowerCase();
+  const combined = `${titleLower} ${descLower}`;
 
-  if (combined.includes('operations') || combined.includes('ops') || combined.includes('analytics') || combined.includes('sql') || combined.includes('power bi')) {
-    if (combined.includes('revops') || combined.includes('sales ops') || combined.includes('revenue ops')) {
-      return 'REVOPS_SALES_OPS';
-    }
-    if (combined.includes('customer success') || combined.includes('cs operations') || combined.includes('cs ops')) {
-      return 'CS_OPERATIONS';
-    }
-    if (combined.includes('business analyst') || combined.includes('business operations') || combined.includes('analista de negócios')) {
-      return 'BUSINESS_ANALYSIS';
-    }
+  // First check title-based strong signals
+  if (
+    titleLower.includes('customer success') ||
+    titleLower.includes('cs analyst') ||
+    titleLower.includes('cs specialist') ||
+    titleLower.includes('analista de customer success')
+  ) {
+    if (titleLower.includes('ops') || titleLower.includes('operation')) return 'CS_OPERATIONS';
+    if (titleLower.includes('onboarding') || titleLower.includes('implementation')) return 'ONBOARDING';
+    return 'CUSTOMER_SUCCESS';
   }
 
-  if (combined.includes('onboarding') || combined.includes('implementaç') || combined.includes('implementation')) {
-    return 'ONBOARDING';
-  }
-
-  if (combined.includes('experience') || combined.includes('cx') || combined.includes('jornada') || combined.includes('touchpoint')) {
+  if (
+    titleLower.includes('customer experience') ||
+    titleLower.includes('cx analyst') ||
+    titleLower.includes('cx specialist')
+  ) {
     return 'CUSTOMER_EXPERIENCE';
   }
 
-  if (combined.includes('support') || combined.includes('atendimento') || combined.includes('ticket') || combined.includes('zendesk') || combined.includes('suporte')) {
-    return 'CUSTOMER_SUPPORT';
+  if (
+    titleLower.includes('onboarding') ||
+    titleLower.includes('implementation') ||
+    titleLower.includes('implementação')
+  ) {
+    return 'ONBOARDING';
   }
 
-  if (combined.includes('account manager') || combined.includes('gerente de contas') || combined.includes('gestão de carteira')) {
+  if (titleLower.includes('account manager') || titleLower.includes('gerente de contas')) {
     return 'ACCOUNT_MANAGEMENT';
   }
 
-  if (combined.includes('business analyst') || combined.includes('analista de processos') || combined.includes('negócios')) {
+  if (titleLower.includes('revops') || titleLower.includes('sales ops') || titleLower.includes('revenue ops')) {
+    return 'REVOPS_SALES_OPS';
+  }
+
+  if (titleLower.includes('business analyst') || titleLower.includes('analista de negócios')) {
+    return 'BUSINESS_ANALYSIS';
+  }
+
+  // Fallback to description signals
+  if (combined.includes('revops') || combined.includes('sales ops') || combined.includes('revenue ops')) {
+    return 'REVOPS_SALES_OPS';
+  }
+  if (combined.includes('cs operations') || combined.includes('cs ops')) {
+    return 'CS_OPERATIONS';
+  }
+  if (combined.includes('onboarding') || combined.includes('implementaç') || combined.includes('implementation')) {
+    return 'ONBOARDING';
+  }
+  if (combined.includes('experience') || combined.includes('cx') || combined.includes('jornada')) {
+    return 'CUSTOMER_EXPERIENCE';
+  }
+  if (combined.includes('support') || combined.includes('atendimento') || combined.includes('ticket') || combined.includes('suporte')) {
+    return 'CUSTOMER_SUPPORT';
+  }
+  if (combined.includes('account manager') || combined.includes('gerente de contas')) {
+    return 'ACCOUNT_MANAGEMENT';
+  }
+  if (combined.includes('business analyst') || combined.includes('analista de negócios')) {
     return 'BUSINESS_ANALYSIS';
   }
 
@@ -229,49 +265,71 @@ export function extractATSKeywords(job: Job, profile: UserProfile): ATSKeywordsA
 }
 
 /**
- * Generates tailored headline for the job.
+ * Generates tailored headline for the job in the target language.
  */
-export function generateTailoredHeadline(job: Job, profile: UserProfile, roleFamily: RoleFamily): string {
-  const familyHeadlines: Record<RoleFamily, { baseTitle: string; defaultSkills: string[] }> = {
+export function generateTailoredHeadline(
+  job: Job,
+  profile: UserProfile,
+  roleFamily: RoleFamily,
+  lang: ResumeLanguage = 'pt-BR'
+): string {
+  const familyHeadlinesPt: Record<RoleFamily, { defaultSkills: string[] }> = {
     CUSTOMER_SUCCESS: {
-      baseTitle: 'Customer Success Specialist',
       defaultSkills: ['Customer Retention', 'Churn Reduction', 'Customer Health', 'HubSpot', 'B2B'],
     },
     ONBOARDING: {
-      baseTitle: 'Customer Onboarding Specialist',
       defaultSkills: ['B2B Onboarding', 'Product Adoption', 'Churn Reduction', 'Customer Success'],
     },
     CUSTOMER_EXPERIENCE: {
-      baseTitle: 'Customer Experience Analyst',
       defaultSkills: ['Customer Journey', 'NPS / CSAT Insights', 'Process Improvement', 'Data Analysis'],
     },
     CS_OPERATIONS: {
-      baseTitle: 'Customer Success Operations Analyst',
       defaultSkills: ['Customer Health Score', 'Data Analysis', 'SQL', 'Power BI', 'HubSpot'],
     },
     ACCOUNT_MANAGEMENT: {
-      baseTitle: 'Account Management & CS Specialist',
       defaultSkills: ['Gestão de Carteira', 'Customer Retention', 'Upsell & Expansão', 'B2B'],
     },
     CUSTOMER_SUPPORT: {
-      baseTitle: 'Customer Support & Service Specialist',
       defaultSkills: ['Atendimento Bilíngue (Português/Inglês)', 'Zendesk', 'Resolução de Problemas', 'Process Improvement'],
     },
     BUSINESS_ANALYSIS: {
-      baseTitle: 'Business & Operations Analyst',
       defaultSkills: ['Data Analysis', 'SQL', 'Power BI', 'Process Improvement', 'Excel Gerencial'],
     },
     REVOPS_SALES_OPS: {
-      baseTitle: 'Revenue & CS Operations Analyst',
       defaultSkills: ['CRM Management', 'HubSpot', 'Reporting & KPIs', 'Data Analysis', 'Customer Lifecycle'],
     },
   };
 
-  const config = familyHeadlines[roleFamily];
+  const familyHeadlinesEn: Record<RoleFamily, { defaultSkills: string[] }> = {
+    CUSTOMER_SUCCESS: {
+      defaultSkills: ['Customer Retention', 'Churn Reduction', 'Customer Health', 'HubSpot', 'B2B'],
+    },
+    ONBOARDING: {
+      defaultSkills: ['B2B Onboarding', 'Product Adoption', 'Churn Reduction', 'Customer Success'],
+    },
+    CUSTOMER_EXPERIENCE: {
+      defaultSkills: ['Customer Journey', 'NPS / CSAT Insights', 'Process Improvement', 'Data Analysis'],
+    },
+    CS_OPERATIONS: {
+      defaultSkills: ['Customer Health Score', 'Data Analysis', 'SQL', 'Power BI', 'HubSpot'],
+    },
+    ACCOUNT_MANAGEMENT: {
+      defaultSkills: ['Portfolio Management', 'Customer Retention', 'Upsell & Expansion', 'B2B'],
+    },
+    CUSTOMER_SUPPORT: {
+      defaultSkills: ['Bilingual Support (Portuguese/English C2)', 'Zendesk', 'Problem Solving', 'Process Improvement'],
+    },
+    BUSINESS_ANALYSIS: {
+      defaultSkills: ['Data Analysis', 'SQL', 'Power BI', 'Process Improvement', 'Excel'],
+    },
+    REVOPS_SALES_OPS: {
+      defaultSkills: ['CRM Management', 'HubSpot', 'Reporting & KPIs', 'Data Analysis', 'Customer Lifecycle'],
+    },
+  };
 
-  // Pick candidate skills that match job keywords
-  const titleWords = job.title;
-  const headlineParts = [titleWords];
+  const config = lang === 'en' ? familyHeadlinesEn[roleFamily] : familyHeadlinesPt[roleFamily];
+
+  const headlineParts = [job.title];
 
   config.defaultSkills.forEach((skill) => {
     if (headlineParts.length < 6) {
@@ -283,14 +341,45 @@ export function generateTailoredHeadline(job: Job, profile: UserProfile, roleFam
 }
 
 /**
- * Generates 3-5 line professional summary using REAL metrics.
+ * Generates 3-5 line professional summary using REAL metrics in the target language.
  */
 export function generateTailoredSummary(
   job: Job,
   profile: UserProfile,
   roleFamily: RoleFamily,
-  atsAnalysis: ATSKeywordsAnalysis
+  atsAnalysis: ATSKeywordsAnalysis,
+  lang: ResumeLanguage = 'pt-BR'
 ): string {
+  if (lang === 'en') {
+    switch (roleFamily) {
+      case 'ONBOARDING':
+        return `Customer Success Specialist with consolidated experience in B2B onboarding, product adoption and customer retention. Proven track record managing 5–15 B2B onboardings per month and reducing customer churn by 15% through onboarding optimization and proactive management of at-risk accounts. Experienced in managing portfolios of 150+ corporate accounts, tracking customer health metrics and data analysis.`;
+
+      case 'CUSTOMER_EXPERIENCE':
+        return `Customer Experience & Journey Analyst focused on mapping critical touchpoints, identifying friction and analyzing customer feedback (NPS/CSAT). Experienced in continuous process improvement supported by data tools (Power BI, SQL), bridging customer support, Product and Operations teams. Proven results including 15% churn reduction and portfolio management of 150+ corporate accounts.`;
+
+      case 'CS_OPERATIONS':
+        return `Customer Success Operations (CS Ops) Analyst with strong analytical capabilities for reporting, KPI tracking and portfolio segmentation. Hands-on experience leveraging data tools (SQL, Power BI, Excel, HubSpot) to track customer health and proactively reduce churn by 15%. Experienced in operational process structuring, portfolio management (150+ accounts) and onboarding workflows.`;
+
+      case 'CUSTOMER_SUPPORT':
+        return `Bilingual Customer Support Specialist (Portuguese and English C2) with a proven track record resolving approximately 60 tickets per day via Zendesk and support platforms. Skilled in critical analysis of request patterns, root-cause diagnosis and knowledge base optimization. Additional background in Customer Success with focus on retention and customer satisfaction.`;
+
+      case 'BUSINESS_ANALYSIS':
+        return `Business & Operations Analyst with expertise in data analysis (SQL, Power BI, Excel), process standardization and management reporting. Experience mapping operational workflows for efficiency gains, combined with Customer Success background impacting churn reduction (-15%) and strategic metric tracking.`;
+
+      case 'REVOPS_SALES_OPS':
+        return `Revenue & CS Operations Analyst focused on CRM management (HubSpot), customer lifecycle optimization, expansion/upsell opportunity identification and portfolio segmentation. Skilled in data analysis and executive dashboards, combining proactive churn mitigation (-15%) and structured onboarding execution.`;
+
+      case 'ACCOUNT_MANAGEMENT':
+        return `Account Management & B2B Relationship Specialist directly managing a portfolio of 150+ active corporate accounts. Experienced in consultative discovery, engagement tracking, churn risk mapping (-15%) and account expansion (upsell) identification.`;
+
+      case 'CUSTOMER_SUCCESS':
+      default:
+        return `Customer Success Specialist with proven experience across the B2B customer lifecycle, including onboarding, adoption, retention and portfolio expansion. Strong track record reducing customer churn by 15%, managing 5–15 B2B onboardings per month, and overseeing an active portfolio of 150+ corporate accounts. Proficient in data analysis (SQL, Power BI, Excel, HubSpot) and customer health score monitoring.`;
+    }
+  }
+
+  // Portuguese default
   switch (roleFamily) {
     case 'ONBOARDING':
       return `Profissional de Customer Success com experiência consolidada em onboarding B2B, aceleração de adoção de produto e retenção de clientes. Histórico comprovado na condução de 5 a 15 onboardings por mês e redução de churn em 15% por meio da otimização do processo de entrada e atuação proativa em contas de risco. Domínio em gestão de carteira com mais de 150 clientes corporativos, acompanhamento de métricas de customer health e análise de dados.`;
@@ -320,11 +409,12 @@ export function generateTailoredSummary(
 }
 
 /**
- * Ranks evidence bullets for the tailored resume.
+ * Ranks evidence bullets for the tailored resume and retrieves text in target language.
  */
 export function rankAndSelectBullets(
   roleFamily: RoleFamily,
-  atsAnalysis: ATSKeywordsAnalysis
+  atsAnalysis: ATSKeywordsAnalysis,
+  lang: ResumeLanguage = 'pt-BR'
 ): TailoredExperience[] {
   const matchedTags = new Set<string>();
   atsAnalysis.matched.forEach((m) => matchedTags.add(normalizeText(m)));
@@ -377,6 +467,18 @@ export function rankAndSelectBullets(
 
   const result: TailoredExperience[] = [];
 
+  function getBulletText(b: BulletEntry): string {
+    return lang === 'en' ? b.textEn : b.textPt;
+  }
+
+  function getTranslatedRole(company: string, originalRole: string): string {
+    if (lang === 'en') {
+      if (company === 'Prefeitura Municipal de Guariba') return 'Human Resources Intern';
+      if (company === 'Raízen') return 'Administrative Assistant';
+    }
+    return originalRole;
+  }
+
   // Logzz Roles
   const logzzBullets = companyBulletsMap.get('Logzz') || [];
   const sortedLogzz = [...logzzBullets].sort((a, b) => calculateBulletScore(b) - calculateBulletScore(a));
@@ -386,7 +488,7 @@ export function rankAndSelectBullets(
   selectedLogzzBullets.forEach((b) => {
     const key = b.sourceRole;
     const existing = logzzRoleMap.get(key) || { role: b.sourceRole, period: b.sourcePeriod, highlights: [] };
-    existing.highlights.push(b.text);
+    existing.highlights.push(getBulletText(b));
     logzzRoleMap.set(key, existing);
   });
 
@@ -409,7 +511,7 @@ export function rankAndSelectBullets(
       company: 'ChatSentry',
       role: selectedChatSentry[0].sourceRole,
       period: selectedChatSentry[0].sourcePeriod,
-      highlights: selectedChatSentry.map((b) => b.text),
+      highlights: selectedChatSentry.map((b) => getBulletText(b)),
     });
   }
 
@@ -420,9 +522,9 @@ export function rankAndSelectBullets(
     if (sortedGuariba.length > 0) {
       result.push({
         company: 'Prefeitura Municipal de Guariba',
-        role: sortedGuariba[0].sourceRole,
+        role: getTranslatedRole('Prefeitura Municipal de Guariba', sortedGuariba[0].sourceRole),
         period: sortedGuariba[0].sourcePeriod,
-        highlights: [sortedGuariba[0].text],
+        highlights: [getBulletText(sortedGuariba[0])],
       });
     }
 
@@ -431,9 +533,9 @@ export function rankAndSelectBullets(
     if (sortedRaizen.length > 0) {
       result.push({
         company: 'Raízen',
-        role: sortedRaizen[0].sourceRole,
+        role: getTranslatedRole('Raízen', sortedRaizen[0].sourceRole),
         period: sortedRaizen[0].sourcePeriod,
-        highlights: [sortedRaizen[0].text],
+        highlights: [getBulletText(sortedRaizen[0])],
       });
     }
   }
@@ -442,15 +544,54 @@ export function rankAndSelectBullets(
 }
 
 /**
- * Builds rationale notes explaining why the resume was tailored.
+ * Builds rationale notes explaining why the resume was tailored in target language.
  */
 export function buildCustomizationNotes(
   job: Job,
   roleFamily: RoleFamily,
-  atsAnalysis: ATSKeywordsAnalysis
+  atsAnalysis: ATSKeywordsAnalysis,
+  lang: ResumeLanguage = 'pt-BR'
 ): string[] {
   const notes: string[] = [];
 
+  if (lang === 'en') {
+    switch (roleFamily) {
+      case 'ONBOARDING':
+        notes.push('B2B Onboarding experience and the "5–15 onboardings/month" metric were prioritized at the top as core job requirements.');
+        notes.push('The 15% churn reduction metric was highlighted in the summary to demonstrate direct onboarding impact on customer retention.');
+        break;
+
+      case 'CS_OPERATIONS':
+        notes.push('Analytical skills (SQL, Power BI, Excel, HubSpot) were elevated to headline and priority skills based on job requirements.');
+        notes.push('Logzz experience highlights prioritized strategic data usage for portfolio segmentation and customer health.');
+        break;
+
+      case 'CUSTOMER_EXPERIENCE':
+        notes.push('Customer Experience Analyst experience at Logzz and journey mapping/feedback (NPS/CSAT) highlights were prioritized.');
+        break;
+
+      case 'CUSTOMER_SUPPORT':
+        notes.push('ChatSentry experience with ~60 tickets/day and bilingual support was prioritized to align with job requirements.');
+        break;
+
+      case 'BUSINESS_ANALYSIS':
+        notes.push('Highlights in data analysis, Excel reporting, and process standardization were prioritized.');
+        break;
+
+      default:
+        notes.push('Retention metrics (15% churn reduction) and portfolio size (150+ accounts) were placed at top due to strategic relevance.');
+        break;
+    }
+
+    if (atsAnalysis.missing.length > 0) {
+      const missingStr = atsAnalysis.missing.slice(0, 3).join(', ');
+      notes.push(`The requirement "${missingStr}" was identified as missing and kept out of experience highlights to guarantee zero hallucination.`);
+    }
+
+    return notes;
+  }
+
+  // Portuguese default
   switch (roleFamily) {
     case 'ONBOARDING':
       notes.push('Experiências em Onboarding B2B e a métrica de "5 a 15 onboardings/mês" foram movidas para o topo do currículo por serem requisitos centrais da vaga.');
@@ -512,15 +653,21 @@ export function saveTailoredResumesMap(map: Record<string, TailoredResume>): voi
 /**
  * Main function: Receives a job and candidate profile and returns the complete Tailored Resume.
  */
-export function generateTailoredResume(job: Job, profile: UserProfile): TailoredResume {
+export function generateTailoredResume(
+  job: Job,
+  profile?: UserProfile,
+  overrideLanguage?: ResumeLanguage
+): TailoredResume {
+  const resumeLanguage: ResumeLanguage = overrideLanguage || detectResumeLanguage(job);
+  const selectedProfile = profile || getUserProfileByLanguage(resumeLanguage);
 
   const roleFamily = detectRoleFamily(job.title, job.description);
-  const atsKeywords = extractATSKeywords(job, profile);
+  const atsKeywords = extractATSKeywords(job, selectedProfile);
 
-  const headline = generateTailoredHeadline(job, profile, roleFamily);
-  const professionalSummary = generateTailoredSummary(job, profile, roleFamily, atsKeywords);
-  const selectedExperienceBullets = rankAndSelectBullets(roleFamily, atsKeywords);
-  const notes = buildCustomizationNotes(job, roleFamily, atsKeywords);
+  const headline = generateTailoredHeadline(job, selectedProfile, roleFamily, resumeLanguage);
+  const professionalSummary = generateTailoredSummary(job, selectedProfile, roleFamily, atsKeywords, resumeLanguage);
+  const selectedExperienceBullets = rankAndSelectBullets(roleFamily, atsKeywords, resumeLanguage);
+  const notes = buildCustomizationNotes(job, roleFamily, atsKeywords, resumeLanguage);
 
   // Compute priority skills from profile matching job keywords
   const prioritySkillsSet = new Set<string>();
@@ -528,7 +675,7 @@ export function generateTailoredResume(job: Job, profile: UserProfile): Tailored
   atsKeywords.related.forEach((rel) => prioritySkillsSet.add(rel.candidateEquivalent));
 
   // Fallback to top profile skills if set is small
-  profile.skills.forEach((skill) => {
+  selectedProfile.skills.forEach((skill) => {
     if (prioritySkillsSet.size < 8) {
       prioritySkillsSet.add(skill);
     }
@@ -546,6 +693,7 @@ export function generateTailoredResume(job: Job, profile: UserProfile): Tailored
       : 100;
 
   return {
+    resumeLanguage,
     targetTitle: job.title,
     headline,
     professionalSummary,

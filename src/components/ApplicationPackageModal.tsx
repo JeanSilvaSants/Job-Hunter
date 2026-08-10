@@ -39,6 +39,7 @@ export const ApplicationPackageModal: React.FC<ApplicationPackageModalProps> = (
   onStatusChange,
 }) => {
   const [status, setStatus] = useState<ApplicationStatus>('PREPARED');
+  const [langOverride, setLangOverride] = useState<'auto' | 'pt-BR' | 'en'>('auto');
   const [copiedResume, setCopiedResume] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
   const [copiedSummary, setCopiedSummary] = useState(false);
@@ -62,8 +63,9 @@ export const ApplicationPackageModal: React.FC<ApplicationPackageModalProps> = (
 
   if (!job) return null;
 
-  const tailoredResume: TailoredResume = generateTailoredResume(job, profile);
-  const fullResumeData = buildFullResumeData(tailoredResume, profile);
+  const overrideLangParam = langOverride === 'auto' ? undefined : langOverride;
+  const tailoredResume: TailoredResume = generateTailoredResume(job, profile, overrideLangParam);
+  const fullResumeData = buildFullResumeData(tailoredResume);
   const fullResumeText = formatFullResumeAsText(fullResumeData);
 
   const handleStatusSelect = (newStatus: ApplicationStatus) => {
@@ -187,6 +189,58 @@ export const ApplicationPackageModal: React.FC<ApplicationPackageModalProps> = (
 
         {/* Modal Scrollable Body */}
         <div className="p-5 space-y-4 overflow-y-auto flex-1 text-xs text-slate-800 bg-slate-50/50">
+          {/* LANGUAGE SELECTOR & BADGE BAR */}
+          <div className="bg-white border border-slate-200 rounded-lg p-3 shadow-2xs flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-bold text-slate-700">Idioma do Currículo:</span>
+              <div className="inline-flex p-1 bg-slate-100 rounded-lg text-xs font-medium">
+                <button
+                  onClick={() => setLangOverride('auto')}
+                  className={`px-3 py-1 rounded-md transition-all cursor-pointer ${
+                    langOverride === 'auto'
+                      ? 'bg-white shadow-xs text-slate-900 font-bold'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  Automático
+                </button>
+                <button
+                  onClick={() => setLangOverride('pt-BR')}
+                  className={`px-3 py-1 rounded-md transition-all cursor-pointer ${
+                    langOverride === 'pt-BR'
+                      ? 'bg-emerald-600 text-white font-bold'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  Português
+                </button>
+                <button
+                  onClick={() => setLangOverride('en')}
+                  className={`px-3 py-1 rounded-md transition-all cursor-pointer ${
+                    langOverride === 'en'
+                      ? 'bg-indigo-600 text-white font-bold'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  English
+                </button>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] text-slate-500">Versão gerada:</span>
+              <span
+                className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-black tracking-wide border ${
+                  tailoredResume.resumeLanguage === 'en'
+                    ? 'bg-indigo-50 text-indigo-700 border-indigo-300'
+                    : 'bg-emerald-50 text-emerald-700 border-emerald-300'
+                }`}
+              >
+                {tailoredResume.resumeLanguage === 'en' ? 'RESUME: EN 🇺🇸' : 'CURRÍCULO: PT-BR 🇧🇷'}
+              </span>
+            </div>
+          </div>
+
           {/* TOP METRICS & SUMMARY CARDS */}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             {/* General Match Score */}

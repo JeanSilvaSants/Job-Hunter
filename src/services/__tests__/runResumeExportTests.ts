@@ -88,6 +88,7 @@ export async function runResumeExportTests() {
   console.log('\n--- 2. BLOB GENERATION INTEGRITY TEST ---');
 
   const mockResume: FullResumeData = {
+    resumeLanguage: 'pt-BR',
     name: 'JEAN SILVA',
     headline: 'Especialista em Customer Success & Atendimento ao Cliente B2B/B2C',
     phone: '(16) 99761-0293',
