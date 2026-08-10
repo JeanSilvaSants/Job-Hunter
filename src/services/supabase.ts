@@ -1,25 +1,27 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
 // Resolve environment variables safely in Vite / Node context
-function getEnvVar(viteKey: string, processKey: string): string | undefined {
+function getEnvVar(primaryKey: string, fallbackKey?: string): string | undefined {
   const metaEnv = (import.meta as any).env;
-  if (metaEnv && metaEnv[viteKey]) {
-    return metaEnv[viteKey];
+  if (metaEnv && metaEnv[primaryKey]) {
+    return metaEnv[primaryKey];
   }
-  if (typeof process !== 'undefined' && process.env && process.env[processKey]) {
-    return process.env[processKey];
+  if (fallbackKey && metaEnv && metaEnv[fallbackKey]) {
+    return metaEnv[fallbackKey];
   }
-  if (typeof process !== 'undefined' && process.env && (process.env as any)[viteKey]) {
-    return (process.env as any)[viteKey];
+  if (typeof process !== 'undefined' && process.env) {
+    if ((process.env as any)[primaryKey]) {
+      return (process.env as any)[primaryKey];
+    }
+    if (fallbackKey && (process.env as any)[fallbackKey]) {
+      return (process.env as any)[fallbackKey];
+    }
   }
   return undefined;
 }
 
-
-const supabaseUrl = getEnvVar('VITE_SUPABASE_URL', 'SUPABASE_URL');
-const supabasePublishableKey =
-  getEnvVar('VITE_SUPABASE_PUBLISHABLE_KEY', 'SUPABASE_PUBLISHABLE_KEY') ||
-  getEnvVar('VITE_SUPABASE_ANON_KEY', 'SUPABASE_ANON_KEY');
+const supabaseUrl = getEnvVar('VITE_SUPABASE_URL');
+const supabasePublishableKey = getEnvVar('VITE_SUPABASE_PUBLISHABLE_KEY', 'VITE_SUPABASE_ANON_KEY');
 
 export const hasSupabaseUrl = Boolean(supabaseUrl && supabaseUrl.trim().length > 0);
 export const hasPublishableKey = Boolean(supabasePublishableKey && supabasePublishableKey.trim().length > 0);
