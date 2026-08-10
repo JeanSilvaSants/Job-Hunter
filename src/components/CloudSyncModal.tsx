@@ -19,7 +19,7 @@ import {
   UserCheck,
   Lock,
 } from 'lucide-react';
-import { isSupabaseConfigured, hasSupabaseUrl, hasPublishableKey, supabaseClient } from '../services/supabase';
+import { isSupabaseConfigured, hasSupabaseUrl, hasPublishableKey, supabaseClient, signOutUser } from '../services/supabase';
 import {
   getCloudSyncDiagnostics,
   CloudSyncDiagnostics,
@@ -103,10 +103,8 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
   };
 
   const handleSignOut = async () => {
-    if (!supabaseClient) return;
     setLoading(true);
-    await supabaseClient.auth.signOut();
-    onClose();
+    await signOutUser();
   };
 
   const handleMigrateLocal = async () => {

@@ -129,6 +129,36 @@ export function initSupabase(force = false): Promise<boolean> {
 initSupabase();
 
 /**
+ * Realiza o encerramento da sessão no Supabase, limpa os tokens de autenticação locais
+ * e recarrega a página para retornar imediatamente à tela de login.
+ */
+export async function signOutUser(): Promise<void> {
+  await initSupabase();
+  if (supabaseClient) {
+    try {
+      await supabaseClient.auth.signOut();
+    } catch {
+      try {
+        await supabaseClient.auth.signOut({ scope: 'local' });
+      } catch (err) {
+        console.warn('[Supabase] Erro ao encerrar sessão local:', err);
+      }
+    }
+  }
+
+  // Remapeia e limpa especificamente tokens de auth do Supabase do localStorage sem apagar os dados da app
+  if (typeof window !== 'undefined' && window.localStorage) {
+    for (let i = localStorage.length - 1; i >= 0; i--) {
+      const key = localStorage.key(i);
+      if (key && (key.startsWith('sb-') || key.includes('supabase.auth.token'))) {
+        localStorage.removeItem(key);
+      }
+    }
+    window.location.href = window.location.origin;
+  }
+}
+
+/**
  * Retorna o ID do usuário autenticado no Supabase ou null se não houver sessão ativa.
  */
 export async function getAuthenticatedUserId(): Promise<string | null> {

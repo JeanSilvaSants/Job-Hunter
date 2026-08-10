@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Target, PlusCircle, TrendingUp, Cloud, LogOut } from 'lucide-react';
 import { UserProfile } from '../types';
-import { isSupabaseConfigured, initSupabase, supabaseClient } from '../services/supabase';
+import { isSupabaseConfigured, initSupabase, signOutUser } from '../services/supabase';
 
 interface HeaderProps {
   profile: UserProfile;
@@ -27,9 +27,7 @@ export const Header: React.FC<HeaderProps> = ({
   }, []);
 
   const handleSignOut = async () => {
-    if (supabaseClient) {
-      await supabaseClient.auth.signOut();
-    }
+    await signOutUser();
   };
 
   return (
