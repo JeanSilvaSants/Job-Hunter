@@ -69,7 +69,7 @@ export function buildFullResumeData(tailored: TailoredResume, profile: UserProfi
     name: profile.name.toUpperCase(),
     headline: tailored.headline,
     phone: profile.phone || '(16) 99761-0293',
-    email: profile.email || 'jeandasilvasantos2015@gmail.com',
+    email: profile.email || 'eusoujeansilvasantos@gmail.com',
     linkedin: profile.linkedin || 'https://www.linkedin.com/in/jeansilvasantos/',
     location: profile.location || 'São Paulo, SP - Brasil',
     professionalSummary: tailored.professionalSummary,
