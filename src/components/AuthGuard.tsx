@@ -31,7 +31,7 @@ export const AuthGuard: React.FC<AuthGuardProps> = ({ children }) => {
       }
 
       if (!isSupabaseConfigured || !supabaseClient) {
-        setAuthState('AUTHENTICATED');
+        setAuthState('UNAUTHENTICATED');
         return;
       }
 

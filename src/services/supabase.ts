@@ -94,6 +94,16 @@ export function initSupabase(force = false): Promise<boolean> {
 
     hasSupabaseUrl = Boolean(url && url.trim().length > 0);
     hasPublishableKey = Boolean(key && key.trim().length > 0);
+
+    // Fallback padrão de projeto para deployments onde /api/config não exista (ex: Vercel)
+    if (!hasSupabaseUrl || !hasPublishableKey) {
+      url = url || 'https://mvynuhnhrnibesxdkbym.supabase.co';
+      key = key || 'sb_publishable_ZcEuT-XVgZrasoU0n6BxQQ_VvDWcu3R';
+      configDetails.apiConfigHttpStatus += ' (Fallback Estático)';
+      hasSupabaseUrl = true;
+      hasPublishableKey = true;
+    }
+
     isSupabaseConfigured = hasSupabaseUrl && hasPublishableKey;
 
     if (isSupabaseConfigured && url && key) {
