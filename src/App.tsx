@@ -28,6 +28,7 @@ import {
   Clock,
   Send,
   MessageSquare,
+  Briefcase,
   Layers,
 } from 'lucide-react';
 import { userProfile } from './data/profile';
@@ -48,6 +49,7 @@ import { JobBoardsModal } from './components/JobBoardsModal';
 import { ProfileModal } from './components/ProfileModal';
 import { AddJobModal } from './components/AddJobModal';
 import { CloudSyncModal } from './components/CloudSyncModal';
+import { ApplicationCockpit } from './components/ApplicationCockpit';
 import { AuthGuard } from './components/AuthGuard';
 import { getStoredStatuses, saveStatusMap } from './services/applicationStatus';
 import { getStoredTailoredResumes, saveTailoredResumesMap } from './services/resume';
@@ -93,6 +95,7 @@ export default function App() {
   const [isAddJobOpen, setIsAddJobOpen] = useState(false);
   const [isJobBoardsOpen, setIsJobBoardsOpen] = useState(false);
   const [isCloudSyncOpen, setIsCloudSyncOpen] = useState(false);
+  const [activeTab, setActiveTab] = useState<'search' | 'cockpit'>('search');
 
 
   // Compute mock jobs with scoring engine
@@ -275,8 +278,54 @@ export default function App() {
           onOpenCloudSync={() => setIsCloudSyncOpen(true)}
         />
 
+        {/* Tab Navigation Bar */}
+        <div className="bg-slate-900 border-b border-slate-800 text-white sticky top-[53px] z-20 shadow-sm">
+          <div className="max-w-7xl mx-auto px-4 flex items-center justify-between text-xs font-bold">
+            <div className="flex items-center gap-1 py-1.5">
+              <button
+                id="btn-tab-search"
+                onClick={() => setActiveTab('search')}
+                className={`px-4 py-2 rounded-lg transition flex items-center gap-2 cursor-pointer ${
+                  activeTab === 'search'
+                    ? 'bg-blue-600 text-white shadow-sm'
+                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
+                }`}
+              >
+                <Search className="w-3.5 h-3.5" />
+                <span>BUSCA DE VAGAS</span>
+                <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-slate-800 text-slate-300">
+                  {filteredAndSortedJobs.length}
+                </span>
+              </button>
+
+              <button
+                id="btn-tab-cockpit"
+                onClick={() => setActiveTab('cockpit')}
+                className={`px-4 py-2 rounded-lg transition flex items-center gap-2 cursor-pointer ${
+                  activeTab === 'cockpit'
+                    ? 'bg-indigo-600 text-white shadow-sm'
+                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
+                }`}
+              >
+                <Briefcase className="w-3.5 h-3.5" />
+                <span>APPLICATION COCKPIT</span>
+                <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-indigo-900/60 text-indigo-300 font-extrabold border border-indigo-700/50">
+                  {statusCounts.prepared + statusCounts.applied + statusCounts.interview}
+                </span>
+              </button>
+            </div>
+          </div>
+        </div>
 
         <main className="max-w-7xl w-full mx-auto px-3 sm:px-5 py-3 space-y-3">
+          {activeTab === 'cockpit' ? (
+            <ApplicationCockpit
+              jobs={baseJobs}
+              profile={userProfile}
+              onViewResume={(j) => setSelectedTailoredResumeJob(j)}
+            />
+          ) : (
+            <>
           {/* Real Job Search Panel (Adzuna + Greenhouse Integration) */}
           <div className="bg-white border border-slate-200 rounded-lg p-3.5 shadow-2xs space-y-3">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2.5 border-b border-slate-100">
@@ -785,6 +834,8 @@ export default function App() {
                 )}
               </div>
             </div>
+          )}
+          </>
           )}
         </main>
       </div>

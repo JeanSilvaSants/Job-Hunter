@@ -8,9 +8,10 @@ import {
   initSupabase,
   configDetails,
 } from './supabase';
-import { Job, JobWithAnalysis, ApplicationStatus } from '../types';
+import { Job, JobWithAnalysis, ApplicationStatus, ApplicationDetails, ApplicationEvent } from '../types';
 import { TailoredResume } from './resume';
 import { DEFAULT_GREENHOUSE_BOARDS, LOCAL_STORAGE_BOARDS_KEY } from '../data/jobBoards';
+import { LOCAL_STORAGE_KEY, LOCAL_STORAGE_DETAILS_KEY, LOCAL_STORAGE_EVENTS_KEY } from './applicationStatus';
 
 export interface CloudSyncDiagnostics {
   apiConfigStatus: string;
@@ -277,8 +278,8 @@ export async function syncJobToSupabase(
  */
 export async function syncApplicationStatus(
   job: Job | JobWithAnalysis,
-  status: ApplicationStatus,
-  notes?: string,
+  details: ApplicationDetails | ApplicationStatus,
+  autoEvent?: ApplicationEvent | null,
   overrideUserId?: string,
   overrideJobId?: string
 ): Promise<boolean> {
@@ -306,13 +307,18 @@ export async function syncApplicationStatus(
       `select application ${job.title}`
     );
 
+    const appDetails: Partial<ApplicationDetails> =
+      typeof details === 'string' ? { status: details } : details;
+
+    const status = appDetails.status || 'NEW';
     const now = new Date().toISOString();
 
-    const prepared_at = status === 'PREPARED' ? (existingApp?.prepared_at || now) : existingApp?.prepared_at || null;
-    const applied_at = status === 'APPLIED' ? (existingApp?.applied_at || now) : existingApp?.applied_at || null;
-    const interview_at = status === 'INTERVIEW' ? (existingApp?.interview_at || now) : existingApp?.interview_at || null;
-    const rejected_at = status === 'REJECTED' ? (existingApp?.rejected_at || now) : existingApp?.rejected_at || null;
-    const offer_at = status === 'OFFER' ? (existingApp?.offer_at || now) : existingApp?.offer_at || null;
+    const prepared_at = appDetails.prepared_at || (status === 'PREPARED' ? (existingApp?.prepared_at || now) : existingApp?.prepared_at || null);
+    const applied_at = appDetails.applied_at || (status === 'APPLIED' ? (existingApp?.applied_at || now) : existingApp?.applied_at || null);
+    const interview_at = appDetails.interview_at || (status === 'INTERVIEW' ? (existingApp?.interview_at || now) : existingApp?.interview_at || null);
+    const rejected_at = appDetails.rejected_at || (status === 'REJECTED' ? (existingApp?.rejected_at || now) : existingApp?.rejected_at || null);
+    const offer_at = appDetails.offer_at || (status === 'OFFER' ? (existingApp?.offer_at || now) : existingApp?.offer_at || null);
+    const last_activity_at = appDetails.last_activity_at || now;
 
     const payload = sanitizePayload({
       user_id: userId,
@@ -323,14 +329,28 @@ export async function syncApplicationStatus(
       interview_at,
       rejected_at,
       offer_at,
-      notes: notes !== undefined ? notes : existingApp?.notes || '',
+      last_activity_at,
+      notes: appDetails.notes !== undefined ? appDetails.notes : existingApp?.notes || null,
+      company_contact_name: appDetails.company_contact_name !== undefined ? appDetails.company_contact_name : existingApp?.company_contact_name || null,
+      company_contact_email: appDetails.company_contact_email !== undefined ? appDetails.company_contact_email : existingApp?.company_contact_email || null,
+      recruiter_name: appDetails.recruiter_name !== undefined ? appDetails.recruiter_name : existingApp?.recruiter_name || null,
+      recruiter_linkedin: appDetails.recruiter_linkedin !== undefined ? appDetails.recruiter_linkedin : existingApp?.recruiter_linkedin || null,
+      salary_expectation: appDetails.salary_expectation !== undefined ? appDetails.salary_expectation : existingApp?.salary_expectation || null,
+      salary_offered: appDetails.salary_offered !== undefined ? appDetails.salary_offered : existingApp?.salary_offered || null,
+      work_model: appDetails.work_model !== undefined ? appDetails.work_model : existingApp?.work_model || null,
+      application_channel: appDetails.application_channel !== undefined ? appDetails.application_channel : existingApp?.application_channel || null,
+      application_url: appDetails.application_url !== undefined ? appDetails.application_url : existingApp?.application_url || null,
+      next_step: appDetails.next_step !== undefined ? appDetails.next_step : existingApp?.next_step || null,
+      next_step_date: appDetails.next_step_date !== undefined ? appDetails.next_step_date : existingApp?.next_step_date || null,
       updated_at: now,
     });
 
-    const { error } = await withTimeout(
+    const { data: upsertedApp, error } = await withTimeout(
       supabaseClient
         .from('applications')
-        .upsert(payload, { onConflict: 'user_id, job_id' }),
+        .upsert(payload, { onConflict: 'user_id, job_id' })
+        .select('id')
+        .maybeSingle(),
       8000,
       `upsert application ${job.title}`
     );
@@ -341,11 +361,105 @@ export async function syncApplicationStatus(
       return false;
     }
 
+    const application_id = upsertedApp?.id || existingApp?.id;
+
+    if (autoEvent && application_id) {
+      await syncApplicationEventInternal({
+        ...autoEvent,
+        application_id,
+        job_id: jobId,
+        user_id: userId,
+      });
+    }
+
     lastSyncTimestamp = new Date().toLocaleTimeString('pt-BR');
     return true;
   } catch (err: any) {
     console.error('[CloudSync] Status sync failed:', err);
     syncErrors.push(`Status ${job.title}: ${err.message || String(err)}`);
+    return false;
+  }
+}
+
+export async function syncApplicationEvent(
+  job: Job | JobWithAnalysis,
+  event: ApplicationEvent,
+  overrideUserId?: string
+): Promise<boolean> {
+  if (!isSupabaseConfigured || !supabaseClient) return false;
+
+  const userId = overrideUserId || (await getAuthenticatedUserId());
+  if (!userId) return false;
+
+  try {
+    const jobId = await syncJobToSupabase(job, { force: true }, userId);
+    if (!jobId) return false;
+
+    // Get remote application id
+    const { data: appData } = await supabaseClient
+      .from('applications')
+      .select('id')
+      .eq('user_id', userId)
+      .eq('job_id', jobId)
+      .maybeSingle();
+
+    if (!appData?.id) return false;
+
+    return await syncApplicationEventInternal({
+      ...event,
+      application_id: appData.id,
+      job_id: jobId,
+      user_id: userId,
+    });
+  } catch (err: any) {
+    console.error('[CloudSync] syncApplicationEvent failed:', err);
+    return false;
+  }
+}
+
+async function syncApplicationEventInternal(eventData: {
+  application_id: string;
+  job_id: string;
+  user_id: string;
+  from_status?: string | null;
+  to_status?: string | null;
+  event_type: string;
+  notes?: string | null;
+  metadata?: Record<string, any>;
+  event_key?: string | null;
+  created_at?: string;
+}): Promise<boolean> {
+  if (!supabaseClient) return false;
+
+  try {
+    const payload = sanitizePayload({
+      user_id: eventData.user_id,
+      application_id: eventData.application_id,
+      job_id: eventData.job_id,
+      from_status: eventData.from_status || null,
+      to_status: eventData.to_status || null,
+      event_type: eventData.event_type,
+      notes: eventData.notes || null,
+      metadata: eventData.metadata || {},
+      event_key: eventData.event_key || null,
+      created_at: eventData.created_at || new Date().toISOString(),
+    });
+
+    const { error } = await withTimeout(
+      supabaseClient
+        .from('application_events')
+        .upsert(payload, { onConflict: 'user_id, event_key' }),
+      8000,
+      `upsert application_event ${eventData.event_type}`
+    );
+
+    if (error) {
+      console.error('[CloudSync] Error syncing application event:', error.message);
+      return false;
+    }
+    return true;
+  } catch (err: any) {
+    console.error('[CloudSync] Event sync failed:', err);
     return false;
   }
 }
@@ -592,6 +706,15 @@ export async function restoreCloudData(): Promise<{
     );
     if (aErr) throw aErr;
 
+    const { data: events, error: eErr } = await withTimeout(
+      supabaseClient.from('application_events').select('*').order('created_at', { ascending: true }),
+      8000,
+      'fetch application_events'
+    );
+    if (eErr && eErr.code !== '42P01') { // Ignore relation missing if migration not applied yet
+      console.warn('[CloudSync] Warning fetching application_events:', eErr.message);
+    }
+
     const { data: resumes, error: rErr } = await withTimeout(
       supabaseClient.from('tailored_resumes').select('*'),
       8000,
@@ -600,6 +723,7 @@ export async function restoreCloudData(): Promise<{
     if (rErr) throw rErr;
 
     const appliedMap: Record<string, ApplicationStatus> = {};
+    const detailsMap: Record<string, ApplicationDetails> = {};
     const tailoredResumesMap: Record<string, TailoredResume> = {};
 
     const jobIdToKeyMap = new Map<string, string>();
@@ -612,8 +736,47 @@ export async function restoreCloudData(): Promise<{
       const key = jobIdToKeyMap.get(app.job_id);
       if (key) {
         appliedMap[key] = app.status as ApplicationStatus;
+        detailsMap[key] = {
+          id: app.id,
+          jobId: app.job_id,
+          jobKey: key,
+          status: app.status as ApplicationStatus,
+          prepared_at: app.prepared_at,
+          applied_at: app.applied_at,
+          interview_at: app.interview_at,
+          rejected_at: app.rejected_at,
+          offer_at: app.offer_at,
+          last_activity_at: app.last_activity_at || app.updated_at || app.created_at,
+          notes: app.notes,
+          company_contact_name: app.company_contact_name,
+          company_contact_email: app.company_contact_email,
+          recruiter_name: app.recruiter_name,
+          recruiter_linkedin: app.recruiter_linkedin,
+          salary_expectation: app.salary_expectation,
+          salary_offered: app.salary_offered,
+          work_model: app.work_model,
+          application_channel: app.application_channel,
+          application_url: app.application_url,
+          next_step: app.next_step,
+          next_step_date: app.next_step_date,
+          created_at: app.created_at,
+          updated_at: app.updated_at,
+        };
       }
     });
+
+    // Save restored details to localStorage
+    if (typeof window !== 'undefined' && window.localStorage) {
+      try {
+        localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(appliedMap));
+        localStorage.setItem(LOCAL_STORAGE_DETAILS_KEY, JSON.stringify(detailsMap));
+        if (events && Array.isArray(events)) {
+          localStorage.setItem(LOCAL_STORAGE_EVENTS_KEY, JSON.stringify(events));
+        }
+      } catch (e) {
+        console.error('Error writing restored application details to localStorage:', e);
+      }
+    }
 
     (resumes || []).forEach((res) => {
       const key = jobIdToKeyMap.get(res.job_id);

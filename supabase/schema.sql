@@ -55,14 +55,72 @@ CREATE TABLE IF NOT EXISTS public.applications (
     rejected_at TIMESTAMPTZ,
     offer_at TIMESTAMPTZ,
     notes TEXT,
+    company_contact_name TEXT,
+    company_contact_email TEXT,
+    recruiter_name TEXT,
+    recruiter_linkedin TEXT,
+    salary_expectation TEXT,
+    salary_offered TEXT,
+    work_model TEXT,
+    application_channel TEXT,
+    application_url TEXT,
+    next_step TEXT,
+    next_step_date TIMESTAMPTZ,
+    last_activity_at TIMESTAMPTZ DEFAULT NOW(),
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW(),
     CONSTRAINT applications_user_job_fk FOREIGN KEY (job_id, user_id) REFERENCES public.jobs(id, user_id) ON DELETE CASCADE,
-    CONSTRAINT applications_user_job_key UNIQUE (user_id, job_id)
+    CONSTRAINT applications_user_job_key UNIQUE (user_id, job_id),
+    CONSTRAINT applications_id_user_key UNIQUE (id, user_id),
+    CONSTRAINT applications_id_user_job_key UNIQUE (id, user_id, job_id),
+    CONSTRAINT chk_applications_status_valid CHECK (status IN ('NEW', 'PREPARED', 'APPLIED', 'INTERVIEW', 'REJECTED', 'OFFER'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_applications_user_id ON public.applications (user_id);
 CREATE INDEX IF NOT EXISTS idx_applications_job_id ON public.applications (job_id);
+
+-- ================================================================
+-- 2b. TABLE: application_events
+-- ================================================================
+CREATE TABLE IF NOT EXISTS public.application_events (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+    application_id UUID NOT NULL,
+    job_id UUID NOT NULL,
+    from_status TEXT,
+    to_status TEXT,
+    event_type TEXT NOT NULL DEFAULT 'STATUS_CHANGE',
+    notes TEXT,
+    metadata JSONB DEFAULT '{}'::jsonb,
+    event_key TEXT,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    CONSTRAINT application_events_parent_fk FOREIGN KEY (application_id, user_id, job_id) REFERENCES public.applications(id, user_id, job_id) ON DELETE CASCADE,
+    CONSTRAINT application_events_user_event_key_key UNIQUE (user_id, event_key),
+    CONSTRAINT chk_app_events_type_valid CHECK (
+      event_type IN (
+        'STATUS_CHANGE',
+        'RECRUITER_CONTACT',
+        'INTERVIEW_SCHEDULED',
+        'INTERVIEW_COMPLETED',
+        'TECHNICAL_TEST',
+        'CASE_SUBMITTED',
+        'FOLLOW_UP_SENT',
+        'OTHER'
+      )
+    ),
+    CONSTRAINT chk_app_events_status_change_to_status CHECK (
+      event_type <> 'STATUS_CHANGE' OR to_status IS NOT NULL
+    ),
+    CONSTRAINT chk_app_events_from_status_valid CHECK (
+      from_status IS NULL OR from_status IN ('NEW', 'PREPARED', 'APPLIED', 'INTERVIEW', 'REJECTED', 'OFFER')
+    ),
+    CONSTRAINT chk_app_events_to_status_valid CHECK (
+      to_status IS NULL OR to_status IN ('NEW', 'PREPARED', 'APPLIED', 'INTERVIEW', 'REJECTED', 'OFFER')
+    )
+);
+
+CREATE INDEX IF NOT EXISTS idx_app_events_user_created ON public.application_events (user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_app_events_app_created ON public.application_events (application_id, created_at ASC);
 
 -- ================================================================
 -- 3. TABLE: tailored_resumes
@@ -156,12 +214,14 @@ CREATE TRIGGER set_tailored_resumes_updated_at
 -- ================================================================
 ALTER TABLE public.jobs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.applications ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.application_events ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.tailored_resumes ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.source_snapshots ENABLE ROW LEVEL SECURITY;
 
 -- Remover políticas antigas se existirem
 DROP POLICY IF EXISTS "Allow all access to jobs" ON public.jobs;
 DROP POLICY IF EXISTS "Allow all access to applications" ON public.applications;
+DROP POLICY IF EXISTS "Allow all access to application_events" ON public.application_events;
 DROP POLICY IF EXISTS "Allow all access to tailored_resumes" ON public.tailored_resumes;
 DROP POLICY IF EXISTS "Allow all access to source_snapshots" ON public.source_snapshots;
 
@@ -175,6 +235,13 @@ CREATE POLICY "Users can manage their own jobs"
 
 CREATE POLICY "Users can manage their own applications"
     ON public.applications
+    FOR ALL
+    TO authenticated
+    USING (auth.uid() = user_id)
+    WITH CHECK (auth.uid() = user_id);
+
+CREATE POLICY "Users can manage their own application events"
+    ON public.application_events
     FOR ALL
     TO authenticated
     USING (auth.uid() = user_id)

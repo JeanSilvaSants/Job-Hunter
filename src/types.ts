@@ -113,3 +113,65 @@ export interface JobAnalysis {
 export interface JobWithAnalysis extends Job {
   analysis: JobAnalysis;
 }
+
+export type ApplicationChannel =
+  | 'LinkedIn'
+  | 'Indeed'
+  | 'Gupy'
+  | 'Greenhouse'
+  | 'Company Website'
+  | 'Referral'
+  | 'Email'
+  | 'Other';
+
+export type ApplicationEventType =
+  | 'STATUS_CHANGE'
+  | 'RECRUITER_CONTACT'
+  | 'INTERVIEW_SCHEDULED'
+  | 'INTERVIEW_COMPLETED'
+  | 'TECHNICAL_TEST'
+  | 'CASE_SUBMITTED'
+  | 'FOLLOW_UP_SENT'
+  | 'OTHER';
+
+export interface ApplicationEvent {
+  id: string;
+  user_id?: string;
+  application_id: string;
+  job_id: string;
+  from_status?: ApplicationStatus | null;
+  to_status?: ApplicationStatus | null;
+  event_type: ApplicationEventType;
+  notes?: string | null;
+  metadata?: Record<string, any>;
+  event_key?: string | null;
+  created_at: string;
+}
+
+export interface ApplicationDetails {
+  id?: string;
+  jobId: string;
+  jobKey: string;
+  status: ApplicationStatus;
+  prepared_at?: string | null;
+  applied_at?: string | null;
+  interview_at?: string | null;
+  rejected_at?: string | null;
+  offer_at?: string | null;
+  last_activity_at?: string | null;
+  notes?: string | null;
+  company_contact_name?: string | null;
+  company_contact_email?: string | null;
+  recruiter_name?: string | null;
+  recruiter_linkedin?: string | null;
+  salary_expectation?: string | null;
+  salary_offered?: string | null;
+  work_model?: WorkplaceType | string | null;
+  application_channel?: ApplicationChannel | string | null;
+  application_url?: string | null;
+  next_step?: string | null;
+  next_step_date?: string | null;
+  created_at?: string;
+  updated_at?: string;
+}
+
