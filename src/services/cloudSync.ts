@@ -107,6 +107,19 @@ export function withTimeout<T>(
 }
 
 /**
+ * Safely converts any potential date value to a valid ISO string.
+ * Returns null if the value is null, undefined, empty, or unparseable.
+ * Does NOT throw RangeError: Invalid time value.
+ */
+export function toSafeISOString(value: unknown): string | null {
+  if (value === null || value === undefined || value === '') return null;
+
+  const date = value instanceof Date ? value : new Date(value as string | number);
+
+  return Number.isNaN(date.getTime()) ? null : date.toISOString();
+}
+
+/**
  * Ensures payload objects do NOT contain `undefined` properties.
  */
 function sanitizePayload<T extends Record<string, any>>(obj: T): T {
@@ -198,6 +211,16 @@ export async function syncJobToSupabase(
   const now = new Date().toISOString();
   const analysis = (job as JobWithAnalysis).analysis;
 
+  const publishedAtSafe = toSafeISOString(job.publishedAt);
+  if (job.publishedAt && publishedAtSafe === null) {
+    console.warn('[CloudSync Diagnostic] Invalid temporal value in job publishedAt:', {
+      external_key: extKey,
+      title: job.title || 'Sem título',
+      invalid_field: 'publishedAt',
+      original_value: job.publishedAt,
+    });
+  }
+
   const payload = sanitizePayload({
     user_id: userId,
     external_key: extKey,
@@ -206,7 +229,7 @@ export async function syncJobToSupabase(
     location: job.location || '',
     description: job.description || '',
     url: job.url || '',
-    published_at: job.publishedAt ? new Date(job.publishedAt).toISOString() : now,
+    published_at: publishedAtSafe,
     source: job.source || 'unknown',
     sources: job.sources || (job.source ? [job.source] : []),
     geo_classification: job.geoCategory || null,
@@ -218,8 +241,8 @@ export async function syncJobToSupabase(
     missing_skills: analysis?.missingSkills || [],
     ats_keywords: analysis?.atsKeywords || [],
     match_reasons: analysis?.matchReasons || [],
-    last_seen_at: now,
-    updated_at: now,
+    last_seen_at: toSafeISOString(now) || now,
+    updated_at: toSafeISOString(now) || now,
   });
 
   try {
@@ -312,13 +335,40 @@ export async function syncApplicationStatus(
 
     const status = appDetails.status || 'NEW';
     const now = new Date().toISOString();
+    const extKey = generateExternalKey(job);
 
-    const prepared_at = appDetails.prepared_at || (status === 'PREPARED' ? (existingApp?.prepared_at || now) : existingApp?.prepared_at || null);
-    const applied_at = appDetails.applied_at || (status === 'APPLIED' ? (existingApp?.applied_at || now) : existingApp?.applied_at || null);
-    const interview_at = appDetails.interview_at || (status === 'INTERVIEW' ? (existingApp?.interview_at || now) : existingApp?.interview_at || null);
-    const rejected_at = appDetails.rejected_at || (status === 'REJECTED' ? (existingApp?.rejected_at || now) : existingApp?.rejected_at || null);
-    const offer_at = appDetails.offer_at || (status === 'OFFER' ? (existingApp?.offer_at || now) : existingApp?.offer_at || null);
-    const last_activity_at = appDetails.last_activity_at || now;
+    const checkAppDate = (fieldName: string, rawValue: unknown): string | null => {
+      const safe = toSafeISOString(rawValue);
+      if (rawValue && safe === null) {
+        console.warn(`[CloudSync Diagnostic] Invalid temporal value in application ${fieldName}:`, {
+          external_key: extKey,
+          title: job.title || 'Sem título',
+          invalid_field: fieldName,
+          original_value: rawValue,
+        });
+      }
+      return safe;
+    };
+
+    const rawPrepared = appDetails.prepared_at || (status === 'PREPARED' ? (existingApp?.prepared_at || now) : existingApp?.prepared_at || null);
+    const prepared_at = checkAppDate('prepared_at', rawPrepared);
+
+    const rawApplied = appDetails.applied_at || (status === 'APPLIED' ? (existingApp?.applied_at || now) : existingApp?.applied_at || null);
+    const applied_at = checkAppDate('applied_at', rawApplied);
+
+    const rawInterview = appDetails.interview_at || (status === 'INTERVIEW' ? (existingApp?.interview_at || now) : existingApp?.interview_at || null);
+    const interview_at = checkAppDate('interview_at', rawInterview);
+
+    const rawRejected = appDetails.rejected_at || (status === 'REJECTED' ? (existingApp?.rejected_at || now) : existingApp?.rejected_at || null);
+    const rejected_at = checkAppDate('rejected_at', rawRejected);
+
+    const rawOffer = appDetails.offer_at || (status === 'OFFER' ? (existingApp?.offer_at || now) : existingApp?.offer_at || null);
+    const offer_at = checkAppDate('offer_at', rawOffer);
+
+    const rawLastActivity = appDetails.last_activity_at || now;
+    const last_activity_at = checkAppDate('last_activity_at', rawLastActivity) || now;
+
+    const next_step_date = checkAppDate('next_step_date', appDetails.next_step_date);
 
     const payload = sanitizePayload({
       user_id: userId,
@@ -341,7 +391,7 @@ export async function syncApplicationStatus(
       application_channel: appDetails.application_channel !== undefined ? appDetails.application_channel : existingApp?.application_channel || null,
       application_url: appDetails.application_url !== undefined ? appDetails.application_url : existingApp?.application_url || null,
       next_step: appDetails.next_step !== undefined ? appDetails.next_step : existingApp?.next_step || null,
-      next_step_date: appDetails.next_step_date !== undefined ? appDetails.next_step_date : existingApp?.next_step_date || null,
+      next_step_date,
       updated_at: now,
     });
 
@@ -432,6 +482,15 @@ async function syncApplicationEventInternal(eventData: {
   if (!supabaseClient) return false;
 
   try {
+    const createdAtSafe = toSafeISOString(eventData.created_at) || new Date().toISOString();
+    if (eventData.created_at && toSafeISOString(eventData.created_at) === null) {
+      console.warn('[CloudSync Diagnostic] Invalid temporal value in application_event created_at:', {
+        event_type: eventData.event_type,
+        invalid_field: 'created_at',
+        original_value: eventData.created_at,
+      });
+    }
+
     const payload = sanitizePayload({
       user_id: eventData.user_id,
       application_id: eventData.application_id,
@@ -442,7 +501,7 @@ async function syncApplicationEventInternal(eventData: {
       notes: eventData.notes || null,
       metadata: eventData.metadata || {},
       event_key: eventData.event_key || null,
-      created_at: eventData.created_at || new Date().toISOString(),
+      created_at: createdAtSafe,
     });
 
     const { error } = await withTimeout(
