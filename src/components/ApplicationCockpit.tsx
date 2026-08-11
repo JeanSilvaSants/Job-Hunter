@@ -36,6 +36,7 @@ interface ApplicationCockpitProps {
   jobs: JobWithAnalysis[];
   profile: UserProfile;
   onViewResume: (job: JobWithAnalysis) => void;
+  onReturnToSearch?: () => void;
 }
 
 type SortOption =
@@ -58,6 +59,7 @@ export const ApplicationCockpit: React.FC<ApplicationCockpitProps> = ({
   jobs,
   profile,
   onViewResume,
+  onReturnToSearch,
 }) => {
   const [selectedJob, setSelectedJob] = useState<JobWithAnalysis | null>(null);
   const [isDetailsOpen, setIsDetailsOpen] = useState(false);
@@ -234,12 +236,24 @@ export const ApplicationCockpit: React.FC<ApplicationCockpitProps> = ({
           </p>
         </div>
 
-        <div className="flex items-center gap-3 bg-slate-800/80 px-4 py-3 rounded-xl border border-slate-700/80">
-          <div className="text-right">
-            <div className="text-[10px] uppercase font-bold text-slate-400">Total Candidaturas Ativas</div>
-            <div className="text-xl font-black text-emerald-400">{metrics.activeTotal}</div>
+        <div className="flex items-center gap-3">
+          {onReturnToSearch && (
+            <button
+              onClick={onReturnToSearch}
+              className="px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-sm cursor-pointer"
+            >
+              <Search className="w-3.5 h-3.5" />
+              <span>Voltar para Vagas</span>
+            </button>
+          )}
+
+          <div className="flex items-center gap-3 bg-slate-800/80 px-4 py-2.5 rounded-xl border border-slate-700/80">
+            <div className="text-right">
+              <div className="text-[10px] uppercase font-bold text-slate-400">Total Candidaturas Ativas</div>
+              <div className="text-xl font-black text-emerald-400">{metrics.activeTotal}</div>
+            </div>
+            <TrendingUp className="w-8 h-8 text-emerald-400/80 p-1 bg-emerald-500/10 rounded-lg border border-emerald-500/20" />
           </div>
-          <TrendingUp className="w-8 h-8 text-emerald-400/80 p-1 bg-emerald-500/10 rounded-lg border border-emerald-500/20" />
         </div>
       </div>
 

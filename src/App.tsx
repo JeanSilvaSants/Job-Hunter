@@ -242,12 +242,39 @@ export default function App() {
           </div>
           <nav className="flex flex-col items-center gap-4">
             <button
-              onClick={() => handleResetFilters()}
-              className="p-2.5 text-white bg-slate-800 rounded-md hover:bg-slate-700 transition cursor-pointer"
-              title="Dashboard de Vagas"
+              id="btn-sidebar-search"
+              onClick={() => {
+                setActiveTab('search');
+                handleResetFilters();
+              }}
+              className={`p-2.5 rounded-md transition cursor-pointer ${
+                activeTab === 'search'
+                  ? 'text-white bg-blue-600 shadow-sm'
+                  : 'text-slate-400 hover:text-white hover:bg-slate-800'
+              }`}
+              title="Vagas / Job Discovery"
             >
-              <LayoutDashboard className="w-4 h-4 text-blue-400" />
+              <LayoutDashboard className="w-4 h-4" />
             </button>
+
+            <button
+              id="btn-sidebar-cockpit"
+              onClick={() => setActiveTab('cockpit')}
+              className={`p-2.5 rounded-md transition cursor-pointer relative ${
+                activeTab === 'cockpit'
+                  ? 'text-white bg-indigo-600 shadow-sm'
+                  : 'text-slate-400 hover:text-white hover:bg-slate-800'
+              }`}
+              title="Candidaturas / Application Cockpit"
+            >
+              <Briefcase className="w-4 h-4" />
+              {statusCounts.prepared + statusCounts.applied + statusCounts.interview > 0 && (
+                <span className="absolute -top-1 -right-1 px-1 py-0.2 rounded-full text-[9px] bg-indigo-500 text-white font-black">
+                  {statusCounts.prepared + statusCounts.applied + statusCounts.interview}
+                </span>
+              )}
+            </button>
+
             <button
               onClick={() => setIsProfileOpen(true)}
               className="p-2.5 hover:text-white hover:bg-slate-800 rounded-md transition cursor-pointer"
@@ -323,6 +350,7 @@ export default function App() {
               jobs={baseJobs}
               profile={userProfile}
               onViewResume={(j) => setSelectedTailoredResumeJob(j)}
+              onReturnToSearch={() => setActiveTab('search')}
             />
           ) : (
             <>
