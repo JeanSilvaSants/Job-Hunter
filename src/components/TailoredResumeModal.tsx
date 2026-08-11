@@ -16,8 +16,8 @@ import {
   ArrowRight
 } from 'lucide-react';
 import { JobWithAnalysis, UserProfile } from '../types';
-import { generateTailoredResume, TailoredResume } from '../services/resume';
-import { syncTailoredResume } from '../services/cloudSync';
+import { generateTailoredResume, TailoredResume, saveTailoredResumeForJob } from '../services/resume';
+import { syncTailoredResume, TailoredResumeSyncDiagnostic } from '../services/cloudSync';
 
 interface TailoredResumeModalProps {
   job: JobWithAnalysis | null;
@@ -33,20 +33,41 @@ export const TailoredResumeModal: React.FC<TailoredResumeModalProps> = ({
   const [viewMode, setViewMode] = useState<'tailored' | 'original'>('tailored');
   const [langOverride, setLangOverride] = useState<'auto' | 'pt-BR' | 'en'>('auto');
   const [copied, setCopied] = useState(false);
+  const [syncDiag, setSyncDiag] = useState<{
+    loading: boolean;
+    diag: TailoredResumeSyncDiagnostic | null;
+  }>({ loading: true, diag: null });
 
   if (!job) return null;
 
   const overrideLangParam = langOverride === 'auto' ? undefined : langOverride;
   const tailoredResume: TailoredResume = generateTailoredResume(job, profile, overrideLangParam);
 
-  // Background Cloud Sync for Tailored Resume (Rule 13)
+  // Auto-save locally and sync to Supabase with step diagnostics (Rule 13 & Tailored Resume Audit)
   React.useEffect(() => {
     if (job && tailoredResume) {
-      syncTailoredResume(job, tailoredResume).catch((err) => {
-        console.warn('[CloudSync] Background tailored resume sync notice:', err);
-      });
+      saveTailoredResumeForJob(job, tailoredResume);
+
+      setSyncDiag({ loading: true, diag: null });
+      syncTailoredResume(job, tailoredResume)
+        .then((diag) => {
+          setSyncDiag({ loading: false, diag });
+        })
+        .catch((err) => {
+          setSyncDiag({
+            loading: false,
+            diag: {
+              success: false,
+              resumeGenerated: true,
+              jobSynced: false,
+              remoteJobId: null,
+              resumeSynced: false,
+              error: { message: err.message || String(err) },
+            },
+          });
+        });
     }
-  }, [job?.id]);
+  }, [job?.id, overrideLangParam]);
 
 
   // Format full resume to plain text for clipboard
@@ -159,6 +180,57 @@ export const TailoredResumeModal: React.FC<TailoredResumeModalProps> = ({
             </button>
           </div>
         </div>
+
+        {/* Sync Diagnostics Status Bar */}
+        <div className="bg-slate-900 text-slate-200 border-b border-slate-800 px-4 py-2 text-xs font-mono flex flex-wrap items-center justify-between gap-2 shrink-0">
+          <div className="flex flex-wrap items-center gap-3">
+            <span className="flex items-center gap-1 font-semibold text-emerald-400">
+              <CheckCircle2 className="w-3.5 h-3.5" /> Tailored Resume generated: OK
+            </span>
+            <span className="text-slate-600">•</span>
+            {syncDiag.loading ? (
+              <span className="text-amber-400 flex items-center gap-1 animate-pulse">
+                Sincronizando com Supabase...
+              </span>
+            ) : syncDiag.diag?.jobSynced ? (
+              <span className="text-emerald-400 flex items-center gap-1">
+                <CheckCircle2 className="w-3.5 h-3.5" /> Job synced: OK
+              </span>
+            ) : (
+              <span className="text-red-400 flex items-center gap-1 font-semibold">
+                <AlertCircle className="w-3.5 h-3.5" /> Job synced: ERROR
+              </span>
+            )}
+            <span className="text-slate-600">•</span>
+            <span className={syncDiag.diag?.remoteJobId ? 'text-blue-300' : 'text-slate-400'}>
+              Remote job_id: {syncDiag.diag?.remoteJobId ? `present (${syncDiag.diag.remoteJobId.slice(0, 8)}...)` : 'missing'}
+            </span>
+            <span className="text-slate-600">•</span>
+            {syncDiag.loading ? (
+              <span className="text-slate-400">Tailored Resume synced: ...</span>
+            ) : syncDiag.diag?.resumeSynced ? (
+              <span className="text-emerald-400 flex items-center gap-1 font-semibold">
+                <CheckCircle2 className="w-3.5 h-3.5" /> Tailored Resume synced: OK
+              </span>
+            ) : (
+              <span className="text-red-400 flex items-center gap-1 font-semibold">
+                <AlertCircle className="w-3.5 h-3.5" /> Tailored Resume synced: ERROR
+              </span>
+            )}
+          </div>
+        </div>
+        {syncDiag.diag?.error && (
+          <div className="bg-red-950/60 border-b border-red-800/80 text-red-200 px-4 py-2 text-xs font-mono shrink-0 flex flex-col gap-0.5">
+            <div className="font-bold flex items-center gap-1.5 text-red-400">
+              <AlertCircle className="w-4 h-4 shrink-0" />
+              <span>Erro de sincronização com Supabase:</span>
+            </div>
+            <div><strong className="text-red-300">Message:</strong> {syncDiag.diag.error.message}</div>
+            {syncDiag.diag.error.code && <div><strong className="text-red-300">Code:</strong> {syncDiag.diag.error.code}</div>}
+            {syncDiag.diag.error.details && <div><strong className="text-red-300">Details:</strong> {syncDiag.diag.error.details}</div>}
+            {syncDiag.diag.error.hint && <div><strong className="text-red-300">Hint:</strong> {syncDiag.diag.error.hint}</div>}
+          </div>
+        )}
 
         {/* Modal Scrollable Body */}
         <div className="p-5 space-y-4 overflow-y-auto flex-1 text-xs text-slate-800">

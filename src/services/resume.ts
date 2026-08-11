@@ -651,6 +651,22 @@ export function saveTailoredResumesMap(map: Record<string, TailoredResume>): voi
 }
 
 /**
+  Persists a tailored resume locally keyed by job.url and external_key.
+ */
+export function saveTailoredResumeForJob(job: Job, resume: TailoredResume): void {
+  const map = getStoredTailoredResumes();
+  if (job.url) {
+    map[job.url] = resume;
+  }
+  const companyClean = (job.company || '').trim().toLowerCase();
+  const titleClean = (job.title || '').trim().toLowerCase();
+  const locClean = (job.location || '').trim().toLowerCase();
+  const extKey = `${companyClean}|${titleClean}|${locClean}`;
+  map[extKey] = resume;
+  saveTailoredResumesMap(map);
+}
+
+/**
  * Main function: Receives a job and candidate profile and returns the complete Tailored Resume.
  */
 export function generateTailoredResume(

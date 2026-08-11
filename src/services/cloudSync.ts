@@ -238,8 +238,33 @@ export async function syncJobToSupabase(
       return null;
     }
 
-    lastSyncTimestamp = new Date().toLocaleTimeString('pt-BR');
-    return data?.id || null;
+    if (data?.id) {
+      lastSyncTimestamp = new Date().toLocaleTimeString('pt-BR');
+      return data.id;
+    }
+
+    // Fallback if upsert select returned no id
+    const { data: fallbackData, error: fbErr } = await withTimeout(
+      supabaseClient
+        .from('jobs')
+        .select('id')
+        .eq('user_id', userId)
+        .eq('external_key', extKey)
+        .maybeSingle(),
+      5000,
+      `fetch job id ${job.title}`
+    );
+
+    if (fallbackData?.id) {
+      lastSyncTimestamp = new Date().toLocaleTimeString('pt-BR');
+      return fallbackData.id;
+    }
+
+    if (fbErr) {
+      syncErrors.push(`Job ${job.title} fetch fallback: ${fbErr.message}`);
+    }
+
+    return null;
   } catch (err: any) {
     console.error('[CloudSync] Job sync failed:', err);
     syncErrors.push(`Job ${job.title}: ${err.message || String(err)}`);
@@ -325,6 +350,15 @@ export async function syncApplicationStatus(
   }
 }
 
+export interface TailoredResumeSyncDiagnostic {
+  success: boolean;
+  resumeGenerated: boolean;
+  jobSynced: boolean;
+  remoteJobId: string | null;
+  resumeSynced: boolean;
+  error?: SupabaseErrorDetails;
+}
+
 /**
  * Sync tailored resume to `tailored_resumes` table.
  */
@@ -333,19 +367,48 @@ export async function syncTailoredResume(
   tailoredResume: TailoredResume,
   overrideUserId?: string,
   overrideJobId?: string
-): Promise<boolean> {
+): Promise<TailoredResumeSyncDiagnostic> {
   if (!isSupabaseConfigured || !supabaseClient) {
-    return false;
+    return {
+      success: false,
+      resumeGenerated: Boolean(tailoredResume),
+      jobSynced: false,
+      remoteJobId: null,
+      resumeSynced: false,
+      error: { message: 'Supabase não está configurado ou cliente não inicializado.' },
+    };
   }
 
   const userId = overrideUserId || (await getAuthenticatedUserId());
   if (!userId) {
-    return false;
+    return {
+      success: false,
+      resumeGenerated: Boolean(tailoredResume),
+      jobSynced: false,
+      remoteJobId: null,
+      resumeSynced: false,
+      error: { message: 'Usuário não autenticado no Supabase.' },
+    };
   }
 
   try {
     const jobId = overrideJobId || (await syncJobToSupabase(job, { force: true }, userId));
-    if (!jobId) return false;
+    const jobSynced = Boolean(jobId);
+
+    if (!jobId) {
+      const errDetails: SupabaseErrorDetails = {
+        message: `Não foi possível sincronizar a vaga no Supabase para obter o job_id remoto.`,
+      };
+      syncErrors.push(`Resume ${job.title}: ${errDetails.message}`);
+      return {
+        success: false,
+        resumeGenerated: Boolean(tailoredResume),
+        jobSynced: false,
+        remoteJobId: null,
+        resumeSynced: false,
+        error: errDetails,
+      };
+    }
 
     const now = new Date().toISOString();
 
@@ -377,17 +440,39 @@ export async function syncTailoredResume(
     );
 
     if (error) {
-      console.error('[CloudSync] Error syncing tailored resume:', error.message);
-      syncErrors.push(`Resume ${job.title}: ${error.message}`);
-      return false;
+      const errDetails = extractSupabaseError(error);
+      console.error('[CloudSync] Error syncing tailored resume:', errDetails.message);
+      syncErrors.push(`Resume ${job.title}: ${errDetails.message}`);
+      return {
+        success: false,
+        resumeGenerated: Boolean(tailoredResume),
+        jobSynced,
+        remoteJobId: jobId,
+        resumeSynced: false,
+        error: errDetails,
+      };
     }
 
     lastSyncTimestamp = new Date().toLocaleTimeString('pt-BR');
-    return true;
+    return {
+      success: true,
+      resumeGenerated: Boolean(tailoredResume),
+      jobSynced: true,
+      remoteJobId: jobId,
+      resumeSynced: true,
+    };
   } catch (err: any) {
-    console.error('[CloudSync] Tailored resume sync failed:', err);
-    syncErrors.push(`Resume ${job.title}: ${err.message || String(err)}`);
-    return false;
+    const errDetails = extractSupabaseError(err);
+    console.error('[CloudSync] Tailored resume sync failed:', errDetails.message);
+    syncErrors.push(`Resume ${job.title}: ${errDetails.message}`);
+    return {
+      success: false,
+      resumeGenerated: Boolean(tailoredResume),
+      jobSynced: false,
+      remoteJobId: null,
+      resumeSynced: false,
+      error: errDetails,
+    };
   }
 }
 
@@ -827,8 +912,8 @@ export async function migrateLocalDataToSupabase(
     let syncedResumes = 0;
     for (const entry of resumeEntries) {
       const existingJobId = keyToJobIdMap.get(entry.extKey) || keyToJobIdMap.get(entry.url);
-      const success = await syncTailoredResume(entry.job, entry.resume, userId, existingJobId);
-      if (success) {
+      const res = await syncTailoredResume(entry.job, entry.resume, userId, existingJobId);
+      if (res.success) {
         syncedResumes++;
       }
     }

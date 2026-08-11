@@ -82,6 +82,7 @@ CREATE TABLE IF NOT EXISTS public.tailored_resumes (
     missing_keywords JSONB DEFAULT '[]'::jsonb,
     audit_notes JSONB DEFAULT '[]'::jsonb,
     ats_coverage INTEGER,
+    resume_language TEXT DEFAULT 'pt-BR',
     resume_text TEXT,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW(),
