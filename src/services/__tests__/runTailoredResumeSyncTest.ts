@@ -20,6 +20,8 @@ export async function runTailoredResumeSyncTest() {
     skills: ['Customer Success', 'Onboarding', 'Churn Analysis', 'SaaS', 'CRM'],
     tools: ['HubSpot', 'Salesforce', 'Zendesk', 'Gainsight'],
     targetTitles: ['Customer Success Manager', 'Analista de CS'],
+    provenResults: ['Aumentou NRR em 20%'],
+    education: [{ degree: 'Bacharelado em Administração', institution: 'USP', status: 'Concluído' }],
     languages: [{ language: 'Português', level: 'Nativo' }, { language: 'Inglês', level: 'Avançado' }],
     mainExperiences: [
       {
@@ -85,7 +87,7 @@ export async function runTailoredResumeSyncTest() {
     publishedAt: new Date().toISOString(),
     analysis: {
       score: 85,
-      classification: 'Forte',
+      classification: 'Boa',
       breakdown: {
         titleScore: 18,
         skillsScore: 22,
