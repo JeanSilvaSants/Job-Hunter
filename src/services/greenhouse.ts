@@ -61,19 +61,46 @@ function cleanText(text: string): string {
  * Infer WorkplaceType from job title and description
  */
 function inferWorkplaceType(title: string, description: string, location: string): WorkplaceType {
-  const combined = `${title} ${description} ${location}`.toLowerCase();
+  const locLower = (location || '').toLowerCase();
+  const titleLower = (title || '').toLowerCase();
+  const descLower = (description || '').toLowerCase();
+  const combined = `${titleLower} ${locLower} ${descLower}`;
+
   if (
-    combined.includes('remoto') ||
-    combined.includes('remote') ||
-    combined.includes('home office') ||
-    combined.includes('teletrabalho') ||
-    combined.includes('100% remoto')
+    locLower.includes('híbrido') ||
+    locLower.includes('hibrido') ||
+    locLower.includes('hybrid') ||
+    titleLower.includes('híbrido') ||
+    titleLower.includes('hibrido') ||
+    titleLower.includes('hybrid') ||
+    descLower.includes('modelo híbrido') ||
+    descLower.includes('modelo hibrido') ||
+    descLower.includes('trabalho híbrido') ||
+    descLower.includes('trabalho hibrido') ||
+    descLower.includes('regime híbrido') ||
+    descLower.includes('regime hibrido')
+  ) {
+    return 'Híbrido';
+  }
+
+  if (
+    locLower.includes('remoto') ||
+    locLower.includes('remote') ||
+    locLower.includes('home office') ||
+    locLower.includes('teletrabalho') ||
+    titleLower.includes('remoto') ||
+    titleLower.includes('remote') ||
+    titleLower.includes('home office') ||
+    descLower.includes('100% remoto') ||
+    descLower.includes('100% remote') ||
+    descLower.includes('totalmente remoto') ||
+    descLower.includes('vaga remota') ||
+    descLower.includes('trabalho remoto') ||
+    descLower.includes('regime remoto')
   ) {
     return 'Remoto';
   }
-  if (combined.includes('híbrido') || combined.includes('hibrido') || combined.includes('hybrid')) {
-    return 'Híbrido';
-  }
+
   return 'Presencial';
 }
 

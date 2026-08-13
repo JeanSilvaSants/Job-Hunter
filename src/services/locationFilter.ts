@@ -257,7 +257,23 @@ export function applySearchLocationFilter<T extends Job>(
     }
 
     // With active search location:
-    // Rule 3: Remote Brazil is ALWAYS INCLUDED (can be done from any searched city)
+    // Any Hybrid or On-site job requires physical presence in the stated city
+    const isPhysicalPresenceRequired = job.workplaceType === 'Híbrido' || job.workplaceType === 'Presencial';
+
+    if (isPhysicalPresenceRequired) {
+      const isMatch = matchesSearchLocation(job.location, cleanSearchLocation);
+      if (isMatch) {
+        metrics.matchedLocal[sourceKey]++;
+        metrics.matchedLocal.total++;
+        filteredJobs.push(job);
+      } else {
+        metrics.rejectedByLocation[sourceKey]++;
+        metrics.rejectedByLocation.total++;
+      }
+      continue;
+    }
+
+    // Rule 3: 100% Remote Brazil is ALWAYS INCLUDED (can be done from any searched city)
     if (geo === 'REMOTE_BRAZIL') {
       metrics.remoteBrazil[sourceKey]++;
       metrics.remoteBrazil.total++;
@@ -273,16 +289,22 @@ export function applySearchLocationFilter<T extends Job>(
       continue;
     }
 
-    // Rule 5: Local jobs (BRAZIL) - On-site or Hybrid must match searched location
+    // Rule 5: BRAZIL general (if remote or matched location)
     if (geo === 'BRAZIL') {
-      const isMatch = matchesSearchLocation(job.location, cleanSearchLocation);
-      if (isMatch) {
-        metrics.matchedLocal[sourceKey]++;
-        metrics.matchedLocal.total++;
+      if (job.workplaceType === 'Remoto') {
+        metrics.remoteBrazil[sourceKey]++;
+        metrics.remoteBrazil.total++;
         filteredJobs.push(job);
       } else {
-        metrics.rejectedByLocation[sourceKey]++;
-        metrics.rejectedByLocation.total++;
+        const isMatch = matchesSearchLocation(job.location, cleanSearchLocation);
+        if (isMatch) {
+          metrics.matchedLocal[sourceKey]++;
+          metrics.matchedLocal.total++;
+          filteredJobs.push(job);
+        } else {
+          metrics.rejectedByLocation[sourceKey]++;
+          metrics.rejectedByLocation.total++;
+        }
       }
       continue;
     }

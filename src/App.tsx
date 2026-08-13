@@ -792,68 +792,105 @@ export default function App() {
 
             {/* Debug Mode Panel */}
             {showDebug && diagnostics && (
-              <div className="bg-slate-900 text-slate-200 p-3.5 rounded-md font-mono text-[11px] space-y-3 border border-slate-800">
-                <div className="text-slate-400 font-bold uppercase tracking-wider text-[10px] flex items-center justify-between border-b border-slate-800 pb-2">
-                  <span className="flex items-center gap-1 text-indigo-400">
-                    <Terminal className="w-3.5 h-3.5" />
-                    Relatório de Diagnóstico Multi-Fonte (Adzuna + Greenhouse)
+              <div className="bg-slate-950 text-slate-200 p-4 rounded-lg font-mono text-[11px] space-y-4 border border-slate-800 shadow-lg">
+                <div className="text-slate-400 font-bold uppercase tracking-wider text-[11px] flex items-center justify-between border-b border-slate-800 pb-2.5">
+                  <span className="flex items-center gap-1.5 text-indigo-400">
+                    <Terminal className="w-4 h-4" />
+                    Diagnóstico Completo de Execução Multi-Fonte (Adzuna + Greenhouse)
                   </span>
-                  <span className="text-slate-500 font-normal">
-                    Latência Total: {diagnostics.latencyMs} ms
+                  <span className="text-slate-400 font-medium">
+                    Latência Total: <strong className="text-white">{diagnostics.latencyMs} ms</strong>
                   </span>
                 </div>
 
-                {/* Section 1: ADZUNA */}
-                {diagnostics.adzuna && (
-                  <div className="space-y-1.5">
-                    <div className="flex items-center justify-between">
-                      <span className="text-blue-400 font-bold text-[10px] block uppercase">ADZUNA API</span>
-                      {diagnostics.adzuna.errorStage && (
-                        <span className="text-[9px] bg-rose-950 text-rose-300 border border-rose-800 px-1.5 py-0.5 rounded font-bold">
-                          ESTÁGIO: {diagnostics.adzuna.errorStage}
-                        </span>
-                      )}
-                    </div>
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-slate-300">
-                      <div>
-                        <span className="text-slate-500 block text-[10px]">RECEBIDAS:</span>
-                        <strong className="text-white">{diagnostics.adzuna.received}</strong>
-                      </div>
-                      <div>
-                        <span className="text-slate-500 block text-[10px]">NORMALIZADAS:</span>
-                        <strong className="text-white">{diagnostics.adzuna.normalized}</strong>
-                      </div>
-                      <div>
-                        <span className="text-slate-500 block text-[10px]">HTTP STATUS:</span>
-                        <strong className="text-white">
-                          Backend: {diagnostics.httpStatus || 200}
-                          {diagnostics.adzunaHttpStatus ? ` / Adzuna: ${diagnostics.adzunaHttpStatus}` : ''}
-                        </strong>
-                      </div>
-                      <div>
-                        <span className="text-slate-500 block text-[10px]">PAÍS / MERCADO:</span>
-                        <strong className="text-white uppercase">{diagnostics.countryCode || 'BR'}</strong>
-                      </div>
-                      <div className="col-span-2 sm:col-span-4">
-                        <span className="text-slate-500 block text-[10px]">QUERY / LOCALIZAÇÃO ENVIADAS:</span>
-                        <span className="text-slate-300">
-                          what: <strong className="text-white font-mono">{diagnostics.query}</strong> | where: <strong className="text-white font-mono">{diagnostics.location}</strong>
-                        </span>
-                      </div>
-                      <div className="col-span-2 sm:col-span-4">
-                        <span className="text-slate-500 block text-[10px]">STATUS DE ERRO:</span>
-                        <strong className={diagnostics.adzuna.error ? 'text-rose-400' : 'text-emerald-400'}>
-                          {diagnostics.adzuna.error || 'Nenhum erro (Adzuna operacional)'}
-                        </strong>
-                      </div>
+                {/* Section 1: ADZUNA REQUEST DEBUG */}
+                <div className="bg-slate-900/90 border border-slate-800 rounded-md p-3 space-y-2.5">
+                  <div className="flex items-center justify-between border-b border-slate-800/80 pb-1.5">
+                    <span className="text-blue-400 font-bold text-[11px] tracking-wide block uppercase">
+                      ADZUNA REQUEST DEBUG
+                    </span>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] text-slate-400">
+                        CREDENTIALS STATUS:
+                      </span>
+                      <span className={`text-[10px] px-1.5 py-0.5 rounded font-bold ${diagnostics.credentialsStatus?.appId === 'CONFIGURED' || !diagnostics.adzunaError?.includes('não foram configuradas') ? 'bg-emerald-950 text-emerald-300 border border-emerald-800' : 'bg-rose-950 text-rose-300 border border-rose-800'}`}>
+                        ADZUNA_APP_ID: {diagnostics.credentialsStatus?.appId || (diagnostics.adzunaError?.includes('não foram configuradas') ? 'MISSING' : 'CONFIGURED')}
+                      </span>
+                      <span className={`text-[10px] px-1.5 py-0.5 rounded font-bold ${diagnostics.credentialsStatus?.appKey === 'CONFIGURED' || !diagnostics.adzunaError?.includes('não foram configuradas') ? 'bg-emerald-950 text-emerald-300 border border-emerald-800' : 'bg-rose-950 text-rose-300 border border-rose-800'}`}>
+                        ADZUNA_APP_KEY: {diagnostics.credentialsStatus?.appKey || (diagnostics.adzunaError?.includes('não foram configuradas') ? 'MISSING' : 'CONFIGURED')}
+                      </span>
                     </div>
                   </div>
-                )}
+
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-slate-300">
+                    <div>
+                      <span className="text-slate-500 block text-[10px]">CLIENT ENDPOINT:</span>
+                      <strong className="text-white font-mono">{diagnostics.clientEndpoint || diagnostics.adzuna?.clientEndpoint || '/api/adzuna/search'}</strong>
+                    </div>
+                    <div>
+                      <span className="text-slate-500 block text-[10px]">BACKEND HANDLER:</span>
+                      <strong className="text-white font-mono">{diagnostics.backendHandler || diagnostics.adzuna?.backendHandler || 'server.ts:queryAdzuna'}</strong>
+                    </div>
+                    <div>
+                      <span className="text-slate-500 block text-[10px]">COUNTRY / MERCADO:</span>
+                      <strong className="text-white uppercase">{diagnostics.countryCode || 'BR'}</strong>
+                    </div>
+                    <div>
+                      <span className="text-slate-500 block text-[10px]">SEARCH LOCATION:</span>
+                      <strong className="text-white">{diagnostics.location || '—'}</strong>
+                    </div>
+
+                    <div>
+                      <span className="text-slate-500 block text-[10px]">QUERY:</span>
+                      <strong className="text-white">{diagnostics.query || '—'}</strong>
+                    </div>
+                    <div>
+                      <span className="text-slate-500 block text-[10px]">BACKEND HTTP:</span>
+                      <strong className="text-white">{diagnostics.httpStatus || 200}</strong>
+                    </div>
+                    <div>
+                      <span className="text-slate-500 block text-[10px]">ADZUNA HTTP:</span>
+                      <strong className="text-white">
+                        {diagnostics.adzunaHttpStatus !== null && diagnostics.adzunaHttpStatus !== undefined ? diagnostics.adzunaHttpStatus : (diagnostics.statusCategory === 'SUCCESS_WITH_RESULTS' ? '200' : '—')}
+                      </strong>
+                    </div>
+                    <div>
+                      <span className="text-slate-500 block text-[10px]">ERROR STAGE:</span>
+                      <strong className={diagnostics.errorStage || diagnostics.adzuna?.errorStage ? 'text-rose-400' : 'text-emerald-400'}>
+                        {diagnostics.errorStage || diagnostics.adzuna?.errorStage || 'NONE'}
+                      </strong>
+                    </div>
+
+                    <div className="col-span-2">
+                      <span className="text-slate-500 block text-[10px]">ERROR CODE:</span>
+                      <strong className={diagnostics.statusCategory.includes('ERROR') || diagnostics.statusCategory.includes('MISSING') ? 'text-rose-400' : 'text-emerald-400'}>
+                        {diagnostics.statusCategory}
+                      </strong>
+                    </div>
+                    <div>
+                      <span className="text-slate-500 block text-[10px]">RECEBIDAS / NORMALIZADAS:</span>
+                      <strong className="text-white">{diagnostics.resultsReceived} / {diagnostics.normalizedCount}</strong>
+                    </div>
+                    <div>
+                      <span className="text-slate-500 block text-[10px]">TOTAL DISPONÍVEL ADZUNA:</span>
+                      <strong className="text-white">{diagnostics.adzunaCount} vagas</strong>
+                    </div>
+
+                    <div className="col-span-2 sm:col-span-4 bg-slate-950/60 p-2 rounded border border-slate-800">
+                      <span className="text-slate-500 block text-[10px]">SANITIZED MESSAGE:</span>
+                      <span className="text-slate-300 break-all block font-mono text-[10px]">
+                        {diagnostics.adzunaError || diagnostics.apiUrlSanitized || 'Adzuna API consultada com sucesso.'}
+                      </span>
+                    </div>
+                  </div>
+                </div>
 
                 {/* Section 2: GREENHOUSE */}
                 {diagnostics.greenhouse && (
-                  <div className="space-y-1.5 pt-2 border-t border-slate-800">
-                    <span className="text-indigo-400 font-bold text-[10px] block uppercase">GREENHOUSE JOB BOARDS</span>
+                  <div className="bg-slate-900/90 border border-slate-800 rounded-md p-3 space-y-2">
+                    <span className="text-indigo-400 font-bold text-[11px] tracking-wide block uppercase">
+                      GREENHOUSE DIRECT BOARDS
+                    </span>
                     <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 text-slate-300">
                       <div>
                         <span className="text-slate-500 block text-[10px]">BOARDS CHECADOS:</span>
@@ -879,11 +916,21 @@ export default function App() {
 
                 {/* Section 3: LOCATION FILTER */}
                 {diagnostics.locationFilter && (
-                  <div className="space-y-1.5 pt-2 border-t border-slate-800">
-                    <div className="flex items-center justify-between">
-                      <span className="text-amber-400 font-bold text-[10px] block uppercase">LOCATION FILTER</span>
-                      <span className="text-[10px] text-amber-300 font-bold">
-                        SEARCH LOCATION: {diagnostics.locationFilter.searchLocation}
+                  <div className="bg-slate-900/90 border border-slate-800 rounded-md p-3 space-y-2">
+                    <div className="flex flex-wrap items-center justify-between border-b border-slate-800/80 pb-1.5 gap-1">
+                      <div className="flex items-center gap-2">
+                        <span className="text-amber-400 font-bold text-[11px] tracking-wide block uppercase">
+                          LOCATION FILTER BREAKDOWN
+                        </span>
+                        <span className="text-[10px] text-emerald-300 font-bold bg-emerald-950/70 border border-emerald-800 px-1.5 py-0.2 rounded">
+                          LOCATION FILTER ENGINE: ACTIVE
+                        </span>
+                        <span className="text-[10px] text-indigo-300 font-bold bg-indigo-950/70 border border-indigo-800 px-1.5 py-0.2 rounded">
+                          LOCATION FILTER VERSION: v1
+                        </span>
+                      </div>
+                      <span className="text-[10px] text-amber-300 font-bold bg-amber-950/70 border border-amber-800 px-2 py-0.5 rounded">
+                        SEARCH LOCATION RECEIVED: {diagnostics.locationFilter.searchLocation || '(Nenhum - Todas as Regiões)'}
                       </span>
                     </div>
                     <div className="grid grid-cols-2 sm:grid-cols-6 gap-2 text-slate-300 text-[10px]">
@@ -894,7 +941,7 @@ export default function App() {
                         <span>GH: <strong className="text-white">{diagnostics.locationFilter.sourceBefore.greenhouse}</strong></span>
                       </div>
                       <div>
-                        <span className="text-slate-500 block">MATCHED LOCAL:</span>
+                        <span className="text-slate-500 block">LOCAL MATCH:</span>
                         <span>Adzuna: <strong className="text-emerald-400">{diagnostics.locationFilter.matchedLocal.adzuna}</strong></span>
                         <br />
                         <span>GH: <strong className="text-emerald-400">{diagnostics.locationFilter.matchedLocal.greenhouse}</strong></span>
@@ -925,22 +972,40 @@ export default function App() {
                   </div>
                 )}
 
-                {/* Section 4: GLOBAL */}
-                {diagnostics.global && (
-                  <div className="space-y-1 pt-2 border-t border-slate-800">
-                    <span className="text-emerald-400 font-bold text-[10px] block uppercase">PIPELINE GLOBAL</span>
-                    <div className="grid grid-cols-3 sm:grid-cols-4 gap-2 text-slate-300">
+                {/* Section 4: MATHEMATICAL AUDIT & GLOBAL PIPELINE */}
+                {diagnostics.global && diagnostics.locationFilter && (
+                  <div className="bg-slate-900/90 border border-slate-800 rounded-md p-3 space-y-2">
+                    <span className="text-emerald-400 font-bold text-[11px] tracking-wide block uppercase">
+                      PIPELINE GLOBAL & AUDITORIA MATEMÁTICA
+                    </span>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-slate-300 text-[10px]">
                       <div>
-                        <span className="text-slate-500 block text-[10px]">ANTES DEDUPLICAÇÃO:</span>
-                        <strong className="text-white">{diagnostics.global.beforeDeduplication}</strong>
+                        <span className="text-slate-500 block">BEFORE LOCATION FILTER:</span>
+                        <strong className="text-white text-xs">{diagnostics.global.beforeLocationFilter}</strong>
                       </div>
                       <div>
-                        <span className="text-slate-500 block text-[10px]">DUPLICATAS REMOVIDAS:</span>
-                        <strong className="text-amber-400">{diagnostics.global.duplicatesRemoved}</strong>
+                        <span className="text-slate-500 block">REJECTED BY SEARCH LOC:</span>
+                        <strong className="text-rose-400 text-xs">-{diagnostics.locationFilter.rejectedByLocation.total}</strong>
                       </div>
                       <div>
-                        <span className="text-slate-500 block text-[10px]">TOTAL FINAL EXIBIDO:</span>
-                        <strong className="text-emerald-400">{diagnostics.global.finalCount}</strong>
+                        <span className="text-slate-500 block">INCLUDED (LOCAL + REMOTO):</span>
+                        <strong className="text-emerald-400 text-xs">
+                          {diagnostics.locationFilter.matchedLocal.total + diagnostics.locationFilter.remoteBrazil.total + diagnostics.locationFilter.latamRemote.total}
+                        </strong>
+                      </div>
+                      <div>
+                        <span className="text-slate-500 block">AFTER LOCATION FILTER:</span>
+                        <strong className="text-amber-400 text-xs">{diagnostics.global.beforeDeduplication}</strong>
+                      </div>
+                      <div>
+                        <span className="text-slate-500 block">DUPLICATES REMOVED:</span>
+                        <strong className="text-rose-400 text-xs">-{diagnostics.global.duplicatesRemoved}</strong>
+                      </div>
+                      <div className="col-span-1 sm:col-span-3 bg-emerald-950/40 border border-emerald-800/80 p-1.5 rounded flex items-center justify-between">
+                        <span className="text-emerald-300 font-bold">FINAL PIPELINE TOTAL:</span>
+                        <strong className="text-emerald-300 text-sm">
+                          {diagnostics.global.finalCount} vagas elegíveis ({diagnostics.global.beforeDeduplication} - {diagnostics.global.duplicatesRemoved} = {diagnostics.global.finalCount})
+                        </strong>
                       </div>
                     </div>
                   </div>
@@ -1119,10 +1184,12 @@ export default function App() {
           <div className="flex items-center justify-between px-0.5 pt-1">
             <div className="flex items-center gap-2">
               <h2 className="text-sm font-extrabold text-slate-900 tracking-tight uppercase">
-                Ranking de Vagas ({useMockData ? 'Modo Teste / Mock' : 'Resultados Adzuna API'})
+                Ranking de Vagas ({useMockData ? 'Modo Teste / Mock' : 'Resultados de Vagas Reais (Multi-Fonte)'})
               </h2>
               <span className="text-[10px] bg-slate-200 text-slate-700 px-2 py-0.5 rounded font-bold">
-                {filteredAndSortedJobs.length} exibidas
+                {filteredAndSortedJobs.length === baseJobs.length
+                  ? `${filteredAndSortedJobs.length} vagas`
+                  : `${filteredAndSortedJobs.length} exibidas de ${baseJobs.length} do pipeline`}
               </span>
             </div>
 

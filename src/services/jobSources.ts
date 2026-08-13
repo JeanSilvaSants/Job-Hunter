@@ -33,7 +33,10 @@ export interface AdzunaRawItem {
 }
 
 export interface DiagnosticsDetails {
-  adzuna: {
+  adzuna?: {
+    clientEndpoint?: string;
+    backendHandler?: string;
+    credentialsStatus?: { appId: string; appKey: string };
     received: number;
     normalized: number;
     error?: string | null;
@@ -60,6 +63,9 @@ export interface DiagnosticsDetails {
 }
 
 export interface AdzunaDiagnostics extends DiagnosticsDetails {
+  clientEndpoint?: string;
+  backendHandler?: string;
+  credentialsStatus?: { appId: string; appKey: string };
   statusCategory: string;
   httpStatus: number;
   adzunaHttpStatus?: number | null;
@@ -125,22 +131,48 @@ function cleanText(text: string): string {
 }
 
 /**
- * Infer WorkplaceType from job title and description
+ * Infer WorkplaceType from job title, description, and location
  */
-function inferWorkplaceType(title: string, description: string): WorkplaceType {
-  const combined = `${title} ${description}`.toLowerCase();
+function inferWorkplaceType(title: string, description: string, location?: string): WorkplaceType {
+  const locLower = (location || '').toLowerCase();
+  const titleLower = (title || '').toLowerCase();
+  const descLower = (description || '').toLowerCase();
+
   if (
-    combined.includes('remoto') ||
-    combined.includes('remote') ||
-    combined.includes('home office') ||
-    combined.includes('teletrabalho') ||
-    combined.includes('100% remoto')
+    locLower.includes('híbrido') ||
+    locLower.includes('hibrido') ||
+    locLower.includes('hybrid') ||
+    titleLower.includes('híbrido') ||
+    titleLower.includes('hibrido') ||
+    titleLower.includes('hybrid') ||
+    descLower.includes('modelo híbrido') ||
+    descLower.includes('modelo hibrido') ||
+    descLower.includes('trabalho híbrido') ||
+    descLower.includes('trabalho hibrido') ||
+    descLower.includes('regime híbrido') ||
+    descLower.includes('regime hibrido')
+  ) {
+    return 'Híbrido';
+  }
+
+  if (
+    locLower.includes('remoto') ||
+    locLower.includes('remote') ||
+    locLower.includes('home office') ||
+    locLower.includes('teletrabalho') ||
+    titleLower.includes('remoto') ||
+    titleLower.includes('remote') ||
+    titleLower.includes('home office') ||
+    descLower.includes('100% remoto') ||
+    descLower.includes('100% remote') ||
+    descLower.includes('totalmente remoto') ||
+    descLower.includes('vaga remota') ||
+    descLower.includes('trabalho remoto') ||
+    descLower.includes('regime remoto')
   ) {
     return 'Remoto';
   }
-  if (combined.includes('híbrido') || combined.includes('hibrido') || combined.includes('hybrid')) {
-    return 'Híbrido';
-  }
+
   return 'Presencial';
 }
 
@@ -235,7 +267,7 @@ export function normalizeAdzunaJob(item: AdzunaRawItem): Job {
     title,
     company,
     location,
-    workplaceType: inferWorkplaceType(title, description),
+    workplaceType: inferWorkplaceType(title, description, location),
     seniority: inferSeniority(title, description),
     description,
     requirements: extractRequirements(title, description),
@@ -509,6 +541,9 @@ export async function searchRealJobs(
   const latencyMs = Math.round(endTime - startTime);
 
   const diagnostics: AdzunaDiagnostics = {
+    clientEndpoint: backendData?.clientEndpoint || '/api/adzuna/search',
+    backendHandler: backendData?.backendHandler || 'server.ts:queryAdzuna',
+    credentialsStatus: backendData?.credentialsStatus,
     statusCategory: backendData?.statusCategory || (adzunaApiError ? 'ADZUNA_ERROR' : 'SUCCESS_WITH_RESULTS'),
     httpStatus: backendData?.httpStatus || 200,
     adzunaHttpStatus: backendData?.adzunaHttpStatus ?? null,
@@ -529,6 +564,9 @@ export async function searchRealJobs(
 
     // Expanded Multi-Source Diagnostics
     adzuna: {
+      clientEndpoint: backendData?.clientEndpoint || '/api/adzuna/search',
+      backendHandler: backendData?.backendHandler || 'server.ts:queryAdzuna',
+      credentialsStatus: backendData?.credentialsStatus,
       received: adzunaRawItems.length,
       normalized: normalizedAdzunaJobs.length,
       error: backendData?.adzunaError || adzunaApiError || null,

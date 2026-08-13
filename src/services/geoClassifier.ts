@@ -65,36 +65,22 @@ export function classifyGeo(location: string, description: string): GeoCategory 
   }
 
   // 2. Brazil Specific Checks (BRAZIL or REMOTE_BRAZIL)
-  const brazilLocations = [
+  const brazilNamedLocations = [
     'brazil',
     'brasil',
-    ' br',
-    'br ',
-    ', br',
-    '/br',
     'são paulo',
     'sao paulo',
-    'sp',
     'rio de janeiro',
-    'rj',
     'minas gerais',
-    'mg',
     'paraná',
     'parana',
-    'pr',
     'santa catarina',
-    'sc',
     'rio grande do sul',
-    'rs',
     'pernambuco',
-    'pe',
     'bahia',
-    'ba',
     'ceará',
     'ceara',
-    'ce',
     'distrito federal',
-    'df',
     'brasília',
     'brasilia',
     'curitiba',
@@ -112,18 +98,39 @@ export function classifyGeo(location: string, description: string): GeoCategory 
     'belem',
     'goiânia',
     'goiania',
+    'ribeirão preto',
+    'ribeirao preto',
+    'são josé dos campos',
+    'sao jose dos campos',
+    'sorocaba',
+    'uberlândia',
+    'uberlandia',
+    'joinville',
+    'vitória',
+    'vitoria',
   ];
 
-  const hasBrazilMention = brazilLocations.some((term) => combined.includes(term));
-  const isRemote =
-    combined.includes('remoto') ||
-    combined.includes('remote') ||
-    combined.includes('home office') ||
-    combined.includes('teletrabalho') ||
-    combined.includes('work from home');
+  const hasBrazilNamedMention = brazilNamedLocations.some((term) => combined.includes(term));
+  const hasBrazilStateAcronym = /\b(sp|rj|mg|pr|sc|rs|pe|ba|ce|df|es|go|mt|ms|am|pa|rn|pb|al|se|pi|ma|to|ro|ac|rr|ap|br)\b/i.test(location) ||
+    /[,/\-\(]\s*(sp|rj|mg|pr|sc|rs|pe|ba|ce|df|es|go|mt|ms|am|pa|rn|pb|al|se|pi|ma|to|ro|ac|rr|ap|br)\b/i.test(combined);
+
+  const hasBrazilMention = hasBrazilNamedMention || hasBrazilStateAcronym;
+  const isExplicitRemote =
+    locLower.includes('remote') ||
+    locLower.includes('remoto') ||
+    locLower.includes('home office') ||
+    locLower.includes('teletrabalho') ||
+    locLower.includes('anywhere') ||
+    combined.includes('100% remoto') ||
+    combined.includes('100% remote') ||
+    combined.includes('totalmente remoto') ||
+    combined.includes('vaga remota') ||
+    combined.includes('trabalho 100% remoto') ||
+    combined.includes('trabalho remoto') ||
+    combined.includes('regime remoto');
 
   if (hasBrazilMention) {
-    if (isRemote || locLower.includes('remote') || locLower.includes('remoto') || locLower.includes('home office')) {
+    if (isExplicitRemote) {
       return 'REMOTE_BRAZIL';
     }
     return 'BRAZIL';

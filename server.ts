@@ -23,10 +23,21 @@ async function startServer() {
     const appId = process.env.ADZUNA_APP_ID;
     const appKey = process.env.ADZUNA_APP_KEY;
 
-    if (!appId || !appKey || appId.trim() === '' || appKey.trim() === '') {
+    const credentialsStatus = {
+      appId: appId && appId.trim() !== '' ? 'CONFIGURED' : 'MISSING',
+      appKey: appKey && appKey.trim() !== '' ? 'CONFIGURED' : 'MISSING',
+    };
+
+    const clientEndpoint = '/api/adzuna/search';
+    const backendHandler = 'server.ts:queryAdzuna';
+
+    if (credentialsStatus.appId === 'MISSING' || credentialsStatus.appKey === 'MISSING') {
       return {
         ok: false,
-        errorStage: 'BACKEND_PROXY',
+        clientEndpoint,
+        backendHandler,
+        credentialsStatus,
+        errorStage: 'BACKEND_PROXY' as const,
         statusCategory: 'MISSING_CREDENTIALS',
         httpStatus: 400,
         adzunaHttpStatus: null,
@@ -123,7 +134,10 @@ async function startServer() {
 
         return {
           ok: false,
-          errorStage: 'ADZUNA_API',
+          clientEndpoint,
+          backendHandler,
+          credentialsStatus,
+          errorStage: 'ADZUNA_API' as const,
           statusCategory,
           httpStatus: 200, // proxy handled gracefully
           adzunaHttpStatus: response.status,
@@ -148,7 +162,10 @@ async function startServer() {
       } catch (parseErr: any) {
         return {
           ok: false,
-          errorStage: 'RESPONSE_PARSE',
+          clientEndpoint,
+          backendHandler,
+          credentialsStatus,
+          errorStage: 'RESPONSE_PARSE' as const,
           statusCategory: 'RESPONSE_PARSE_ERROR',
           httpStatus: 200,
           adzunaHttpStatus: response.status,
@@ -178,6 +195,9 @@ async function startServer() {
 
       return {
         ok: true,
+        clientEndpoint,
+        backendHandler,
+        credentialsStatus,
         errorStage: null,
         statusCategory,
         httpStatus: 200,
@@ -199,7 +219,10 @@ async function startServer() {
       console.error('Network/Server Exception querying Adzuna:', err);
       return {
         ok: false,
-        errorStage: 'BACKEND_PROXY',
+        clientEndpoint,
+        backendHandler,
+        credentialsStatus,
+        errorStage: 'BACKEND_PROXY' as const,
         statusCategory: 'NETWORK_ERROR',
         httpStatus: 500,
         adzunaHttpStatus: null,
