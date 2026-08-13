@@ -30,14 +30,27 @@ import {
   MessageSquare,
   Briefcase,
   Layers,
+  Star,
+  X,
+  Bookmark,
 } from 'lucide-react';
 import { userProfile } from './data/profile';
 import { mockJobs } from './data/mockJobs';
+import { calculateApplyPriority } from './services/applyPriority';
 import { calculateJobScore } from './services/scoring';
 import { Job, JobWithAnalysis, WorkplaceType, ApplicationStatus } from './types';
 import { searchRealJobs, SearchJobsResult, AdzunaDiagnostics } from './services/jobSources';
 import { getJobStatus, STATUS_LABELS } from './services/applicationStatus';
 import { exportJobsToExcel } from './services/exportExcel';
+import {
+  SUPPORTED_ADZUNA_COUNTRIES,
+  FavoriteLocation,
+  getStoredFavoriteLocations,
+  addFavoriteLocation,
+  removeFavoriteLocation,
+  getStoredSelectedCountry,
+  saveSelectedCountry,
+} from './services/jobLocations';
 import { Header } from './components/Header';
 import { StatsDashboard } from './components/StatsDashboard';
 import { JobCard } from './components/JobCard';
@@ -50,6 +63,7 @@ import { ProfileModal } from './components/ProfileModal';
 import { AddJobModal } from './components/AddJobModal';
 import { CloudSyncModal } from './components/CloudSyncModal';
 import { ApplicationCockpit } from './components/ApplicationCockpit';
+import { AnalyticsDashboard } from './components/AnalyticsDashboard';
 import { AuthGuard } from './components/AuthGuard';
 import { getStoredStatuses, saveStatusMap } from './services/applicationStatus';
 import { getStoredTailoredResumes, saveTailoredResumesMap } from './services/resume';
@@ -60,12 +74,53 @@ export default function App() {
 
   // Search parameters for Job Hunter AI
   const [searchQuery, setSearchQuery] = useState<string>('Customer Success');
+  const [searchCountry, setSearchCountry] = useState<string>(() => getStoredSelectedCountry());
   const [searchLocation, setSearchLocation] = useState<string>(''); // Default empty to avoid sending 'where=Brazil' to /br/ endpoint
+  const [favoriteLocations, setFavoriteLocations] = useState<FavoriteLocation[]>(() => getStoredFavoriteLocations());
   const [searchDaysOld, setSearchDaysOld] = useState<number>(30);
   const [searchMinScore, setSearchMinScore] = useState<number>(0);
   const [searchAllTargets, setSearchAllTargets] = useState<boolean>(false);
   const [sourceFilter, setSourceFilter] = useState<'all' | 'adzuna' | 'greenhouse'>('all');
   const [includeUncertainIntl, setIncludeUncertainIntl] = useState<boolean>(false);
+
+  // Handlers for Favorite Geographic Locations
+  const handleCountryChange = (newCountry: string) => {
+    setSearchCountry(newCountry);
+    saveSelectedCountry(newCountry);
+  };
+
+  const handleToggleFavoriteLocation = (locName: string) => {
+    const clean = locName.trim();
+    if (!clean) return;
+    const exists = favoriteLocations.some(
+      (f) => f.name.toLowerCase() === clean.toLowerCase() && f.countryCode === searchCountry
+    );
+    if (exists) {
+      const match = favoriteLocations.find(
+        (f) => f.name.toLowerCase() === clean.toLowerCase() && f.countryCode === searchCountry
+      );
+      if (match) {
+        const updated = removeFavoriteLocation(match.id);
+        setFavoriteLocations(updated);
+      }
+    } else {
+      const updated = addFavoriteLocation(clean, searchCountry);
+      setFavoriteLocations(updated);
+    }
+  };
+
+  const handleRemoveFavoriteLocationById = (e: React.MouseEvent, id: string) => {
+    e.stopPropagation();
+    const updated = removeFavoriteLocation(id);
+    setFavoriteLocations(updated);
+  };
+
+  const isCurrentLocationFavorite = useMemo(() => {
+    if (!searchLocation.trim()) return false;
+    return favoriteLocations.some(
+      (f) => f.name.toLowerCase() === searchLocation.trim().toLowerCase() && f.countryCode === searchCountry
+    );
+  }, [searchLocation, searchCountry, favoriteLocations]);
 
   // Search execution state
   const [isLoading, setIsLoading] = useState<boolean>(false);
@@ -83,7 +138,8 @@ export default function App() {
   const [activeStatFilter, setActiveStatFilter] = useState<string>('all');
   const [workplaceFilter, setWorkplaceFilter] = useState<string>('all');
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
-  const [sortBy, setSortBy] = useState<'score' | 'title' | 'company'>('score');
+  const [priorityFilter, setPriorityFilter] = useState<string>('ALL');
+  const [sortBy, setSortBy] = useState<'score' | 'applyPriority' | 'title' | 'company'>('score');
   const [statusVersion, setStatusVersion] = useState<number>(0);
 
   // Modals state
@@ -95,8 +151,7 @@ export default function App() {
   const [isAddJobOpen, setIsAddJobOpen] = useState(false);
   const [isJobBoardsOpen, setIsJobBoardsOpen] = useState(false);
   const [isCloudSyncOpen, setIsCloudSyncOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState<'search' | 'cockpit'>('search');
-
+  const [activeTab, setActiveTab] = useState<'search' | 'cockpit' | 'analytics'>('search');
 
   // Compute mock jobs with scoring engine
   const mockJobsWithAnalysis: JobWithAnalysis[] = useMemo(() => {
@@ -117,6 +172,7 @@ export default function App() {
       {
         query: searchQuery,
         location: searchLocation,
+        country: searchCountry,
         daysOld: searchDaysOld,
         searchAllTargets: searchAllTargets,
         sourceFilter: sourceFilter,
@@ -176,9 +232,21 @@ export default function App() {
           if (currentStatus !== statusFilter) return false;
         }
 
+        // Apply Priority classification filter
+        if (priorityFilter !== 'ALL') {
+          const priorityRes = calculateApplyPriority(job);
+          if (priorityFilter === 'APPLY_NOW' && priorityRes.classification !== 'APPLY NOW') return false;
+          if (priorityFilter === 'HIGH_PRIORITY' && priorityRes.classification !== 'HIGH PRIORITY') return false;
+          if (priorityFilter === 'REVIEW' && priorityRes.classification !== 'REVIEW') return false;
+          if (priorityFilter === 'NOT_ELIGIBLE' && priorityRes.classification !== 'NOT ELIGIBLE') return false;
+        }
+
         return true;
       })
       .sort((a, b) => {
+        if (sortBy === 'applyPriority') {
+          return calculateApplyPriority(b).score - calculateApplyPriority(a).score;
+        }
         if (sortBy === 'score') {
           return b.analysis.score - a.analysis.score;
         }
@@ -190,7 +258,7 @@ export default function App() {
         }
         return 0;
       });
-  }, [baseJobs, localSearchTerm, searchMinScore, activeStatFilter, workplaceFilter, statusFilter, sortBy, statusVersion]);
+  }, [baseJobs, localSearchTerm, searchMinScore, activeStatFilter, workplaceFilter, statusFilter, priorityFilter, sortBy, statusVersion]);
 
   // Dashboard Status Indicators (re-evaluated on status update)
   const statusCounts = useMemo(() => {
@@ -227,7 +295,8 @@ export default function App() {
     setActiveStatFilter('all');
     setWorkplaceFilter('all');
     setStatusFilter('ALL');
-    setSortBy('score');
+    setPriorityFilter('ALL');
+    setSortBy('applyPriority');
     setSearchMinScore(0);
   };
 
@@ -273,6 +342,19 @@ export default function App() {
                   {statusCounts.prepared + statusCounts.applied + statusCounts.interview}
                 </span>
               )}
+            </button>
+
+            <button
+              id="btn-sidebar-analytics"
+              onClick={() => setActiveTab('analytics')}
+              className={`p-2.5 rounded-md transition cursor-pointer ${
+                activeTab === 'analytics'
+                  ? 'text-white bg-emerald-600 shadow-sm'
+                  : 'text-slate-400 hover:text-white hover:bg-slate-800'
+              }`}
+              title="Analytics & Métricas de Conversão"
+            >
+              <BarChart3 className="w-4 h-4" />
             </button>
 
             <button
@@ -340,6 +422,19 @@ export default function App() {
                   {statusCounts.prepared + statusCounts.applied + statusCounts.interview}
                 </span>
               </button>
+
+              <button
+                id="btn-tab-analytics"
+                onClick={() => setActiveTab('analytics')}
+                className={`px-4 py-2 rounded-lg transition flex items-center gap-2 cursor-pointer ${
+                  activeTab === 'analytics'
+                    ? 'bg-emerald-600 text-white shadow-sm'
+                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
+                }`}
+              >
+                <BarChart3 className="w-3.5 h-3.5" />
+                <span>ANALYTICS & CONVERSÃO</span>
+              </button>
             </div>
           </div>
         </div>
@@ -351,6 +446,11 @@ export default function App() {
               profile={userProfile}
               onViewResume={(j) => setSelectedTailoredResumeJob(j)}
               onReturnToSearch={() => setActiveTab('search')}
+            />
+          ) : activeTab === 'analytics' ? (
+            <AnalyticsDashboard
+              jobs={baseJobs}
+              onOpenJobDetails={(j) => setSelectedAnalysisJob(j)}
             />
           ) : (
             <>
@@ -406,7 +506,7 @@ export default function App() {
             {/* High Density Search Form Inputs */}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-2 text-xs">
               {/* Cargo / Palavra-chave */}
-              <div className="space-y-1 sm:col-span-2 lg:col-span-1">
+              <div className="space-y-1 sm:col-span-2 lg:col-span-2">
                 <label className="block text-[10px] font-bold text-slate-700 uppercase tracking-wider">
                   Cargo / Palavra-chave
                 </label>
@@ -418,6 +518,67 @@ export default function App() {
                   onChange={(e) => setSearchQuery(e.target.value)}
                   className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:bg-white rounded-md px-2.5 py-1.5 text-xs text-slate-800 placeholder-slate-400 focus:outline-none transition font-medium disabled:opacity-50 disabled:bg-slate-100"
                 />
+              </div>
+
+              {/* País (Adzuna Country) */}
+              <div className="space-y-1">
+                <label className="block text-[10px] font-bold text-slate-700 uppercase tracking-wider">
+                  País (Adzuna)
+                </label>
+                <select
+                  value={searchCountry}
+                  onChange={(e) => handleCountryChange(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200 focus:border-indigo-500 focus:bg-white rounded-md px-2.5 py-1.5 text-xs text-slate-900 focus:outline-none transition font-semibold cursor-pointer"
+                >
+                  {SUPPORTED_ADZUNA_COUNTRIES.map((c) => (
+                    <option key={c.code} value={c.code}>
+                      {c.flag} {c.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Localização com Favoritar / Limpar */}
+              <div className="space-y-1">
+                <div className="flex items-center justify-between">
+                  <label className="block text-[10px] font-bold text-slate-700 uppercase tracking-wider">
+                    Cidade / Região
+                  </label>
+                  {searchLocation.trim() && (
+                    <button
+                      type="button"
+                      onClick={() => handleToggleFavoriteLocation(searchLocation)}
+                      className={`text-[10px] flex items-center gap-0.5 font-bold cursor-pointer transition ${
+                        isCurrentLocationFavorite
+                          ? 'text-amber-600 hover:text-amber-700'
+                          : 'text-slate-400 hover:text-amber-500'
+                      }`}
+                      title={isCurrentLocationFavorite ? 'Remover dos favoritos' : 'Salvar como cidade favorita'}
+                    >
+                      <Star className={`w-3 h-3 ${isCurrentLocationFavorite ? 'fill-amber-400 text-amber-500' : ''}`} />
+                      <span>{isCurrentLocationFavorite ? 'Favorito' : 'Favoritar'}</span>
+                    </button>
+                  )}
+                </div>
+                <div className="relative">
+                  <input
+                    type="text"
+                    placeholder="Ex: São Paulo, Curitiba..."
+                    value={searchLocation}
+                    onChange={(e) => setSearchLocation(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:bg-white rounded-md pl-2.5 pr-7 py-1.5 text-xs text-slate-800 placeholder-slate-400 focus:outline-none transition font-medium"
+                  />
+                  {searchLocation && (
+                    <button
+                      type="button"
+                      onClick={() => setSearchLocation('')}
+                      className="absolute right-2 top-2 text-slate-400 hover:text-slate-600 p-0.5 rounded-full cursor-pointer"
+                      title="Limpar localização"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  )}
+                </div>
               </div>
 
               {/* Fonte de Vagas */}
@@ -437,39 +598,7 @@ export default function App() {
                 </select>
               </div>
 
-              {/* Localização */}
-              <div className="space-y-1">
-                <label className="block text-[10px] font-bold text-slate-700 uppercase tracking-wider">
-                  Cidade / Estado (ou Vazio)
-                </label>
-                <input
-                  type="text"
-                  placeholder="Ex: São Paulo, Curitiba..."
-                  value={searchLocation}
-                  onChange={(e) => setSearchLocation(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:bg-white rounded-md px-2.5 py-1.5 text-xs text-slate-800 placeholder-slate-400 focus:outline-none transition font-medium"
-                />
-              </div>
-
-              {/* Período */}
-              <div className="space-y-1">
-                <label className="block text-[10px] font-bold text-slate-700 uppercase tracking-wider">
-                  Publicadas nos Últimos
-                </label>
-                <select
-                  value={searchDaysOld}
-                  onChange={(e) => setSearchDaysOld(Number(e.target.value))}
-                  className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:bg-white rounded-md px-2.5 py-1.5 text-xs text-slate-800 focus:outline-none transition font-semibold cursor-pointer"
-                >
-                  <option value={1}>24 horas (1 dia)</option>
-                  <option value={3}>3 dias</option>
-                  <option value={7}>7 dias</option>
-                  <option value={14}>14 dias</option>
-                  <option value={30}>30 dias</option>
-                </select>
-              </div>
-
-              {/* Score Mínimo & Submit */}
+              {/* Submit Button */}
               <div className="space-y-1 flex flex-col justify-end">
                 <button
                   id="btn-search-adzuna-jobs"
@@ -490,6 +619,85 @@ export default function App() {
                   )}
                 </button>
               </div>
+            </div>
+
+            {/* Geographic Shortcuts & Favorite Locations Bar */}
+            <div className="flex flex-wrap items-center gap-1.5 pt-1 text-[11px] text-slate-600 border-t border-slate-100">
+              <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1 mr-1">
+                <MapPin className="w-3 h-3 text-indigo-500" />
+                <span>Locais:</span>
+              </span>
+
+              {/* Selected Country Flag and Quick Clear */}
+              <button
+                type="button"
+                onClick={() => setSearchLocation('')}
+                className={`px-2 py-0.5 rounded text-[10px] font-semibold transition cursor-pointer border ${
+                  !searchLocation.trim()
+                    ? 'bg-indigo-50 text-indigo-700 border-indigo-200 font-bold'
+                    : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+                }`}
+              >
+                🌐 Todo o País ({SUPPORTED_ADZUNA_COUNTRIES.find((c) => c.code === searchCountry)?.name || searchCountry.toUpperCase()})
+              </button>
+
+              {/* Preset Cities for Current Country */}
+              {(SUPPORTED_ADZUNA_COUNTRIES.find((c) => c.code === searchCountry)?.presetCities || []).map((city) => {
+                const isSelected = searchLocation.trim().toLowerCase() === city.toLowerCase();
+                return (
+                  <button
+                    key={city}
+                    type="button"
+                    onClick={() => setSearchLocation(city)}
+                    className={`px-2 py-0.5 rounded text-[10px] font-medium transition cursor-pointer border ${
+                      isSelected
+                        ? 'bg-indigo-600 text-white border-indigo-600 font-bold shadow-2xs'
+                        : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100 hover:text-slate-900'
+                    }`}
+                  >
+                    {city}
+                  </button>
+                );
+              })}
+
+              {/* Custom Favorite Locations */}
+              {favoriteLocations.map((fav) => {
+                const isSelected = searchLocation.trim().toLowerCase() === fav.name.toLowerCase();
+                return (
+                  <div
+                    key={fav.id}
+                    className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold transition border ${
+                      isSelected
+                        ? 'bg-amber-500 text-white border-amber-500 shadow-2xs'
+                        : 'bg-amber-50 text-amber-900 border-amber-200 hover:bg-amber-100'
+                    }`}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSearchLocation(fav.name);
+                        if (fav.countryCode && fav.countryCode !== searchCountry) {
+                          handleCountryChange(fav.countryCode);
+                        }
+                      }}
+                      className="cursor-pointer flex items-center gap-0.5"
+                    >
+                      <Star className={`w-2.5 h-2.5 ${isSelected ? 'fill-white text-white' : 'fill-amber-400 text-amber-600'}`} />
+                      <span>{fav.name}</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={(e) => handleRemoveFavoriteLocationById(e, fav.id)}
+                      className={`hover:opacity-100 p-0.5 rounded-full cursor-pointer ${
+                        isSelected ? 'text-white/80 hover:text-white' : 'text-amber-600 hover:text-amber-800'
+                      }`}
+                      title="Remover dos favoritos"
+                    >
+                      <X className="w-2.5 h-2.5" />
+                    </button>
+                  </div>
+                );
+              })}
             </div>
 
             {/* Options Checkboxes & Debug Toggle */}
@@ -528,6 +736,29 @@ export default function App() {
               )}
             </div>
 
+            {/* Active Geographic Filter Status Banner */}
+            {searchLocation.trim() && (
+              <div className="bg-indigo-50/70 border border-indigo-200/80 rounded-md px-3 py-1.5 text-xs text-indigo-900 flex items-center justify-between gap-2">
+                <div className="flex items-center gap-1.5">
+                  <MapPin className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+                  <span className="font-bold">Filtro geográfico ativo:</span>
+                  <span className="bg-indigo-100 text-indigo-800 px-1.5 py-0.5 rounded font-mono font-bold text-[11px]">
+                    {searchLocation.trim()}
+                  </span>
+                  <span className="text-indigo-600 text-[11px]">
+                    (+ Vagas Remoto Brasil & LATAM compatíveis inclusas)
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setSearchLocation('')}
+                  className="text-[11px] font-semibold text-indigo-600 hover:text-indigo-800 underline cursor-pointer"
+                >
+                  Remover filtro
+                </button>
+              </div>
+            )}
+
             {/* Error States Display */}
             {searchError && (
               <div className="bg-amber-50 border border-amber-200 rounded-md p-3 text-xs text-amber-900 flex items-start gap-2.5">
@@ -541,9 +772,16 @@ export default function App() {
                         ? 'Erro de Autenticação na Adzuna (401/403)'
                         : 'Atenção ao consultar fontes de vagas'}
                     </span>
-                    <span className="font-mono text-[10px] bg-amber-200 text-amber-900 px-1.5 py-0.5 rounded font-bold">
-                      {searchErrorCode}
-                    </span>
+                    <div className="flex items-center gap-1.5">
+                      {diagnostics?.errorStage && (
+                        <span className="font-mono text-[9px] bg-rose-100 text-rose-800 px-1.5 py-0.5 rounded font-bold uppercase">
+                          FALHA: {diagnostics.errorStage}
+                        </span>
+                      )}
+                      <span className="font-mono text-[10px] bg-amber-200 text-amber-900 px-1.5 py-0.5 rounded font-bold">
+                        {searchErrorCode}
+                      </span>
+                    </div>
                   </div>
                   <div className="text-amber-800 leading-relaxed font-medium">
                     {searchError}
@@ -567,9 +805,16 @@ export default function App() {
 
                 {/* Section 1: ADZUNA */}
                 {diagnostics.adzuna && (
-                  <div className="space-y-1">
-                    <span className="text-blue-400 font-bold text-[10px] block uppercase">ADZUNA API</span>
-                    <div className="grid grid-cols-3 sm:grid-cols-4 gap-2 text-slate-300">
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <span className="text-blue-400 font-bold text-[10px] block uppercase">ADZUNA API</span>
+                      {diagnostics.adzuna.errorStage && (
+                        <span className="text-[9px] bg-rose-950 text-rose-300 border border-rose-800 px-1.5 py-0.5 rounded font-bold">
+                          ESTÁGIO: {diagnostics.adzuna.errorStage}
+                        </span>
+                      )}
+                    </div>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-slate-300">
                       <div>
                         <span className="text-slate-500 block text-[10px]">RECEBIDAS:</span>
                         <strong className="text-white">{diagnostics.adzuna.received}</strong>
@@ -578,10 +823,27 @@ export default function App() {
                         <span className="text-slate-500 block text-[10px]">NORMALIZADAS:</span>
                         <strong className="text-white">{diagnostics.adzuna.normalized}</strong>
                       </div>
-                      <div className="col-span-2">
+                      <div>
+                        <span className="text-slate-500 block text-[10px]">HTTP STATUS:</span>
+                        <strong className="text-white">
+                          Backend: {diagnostics.httpStatus || 200}
+                          {diagnostics.adzunaHttpStatus ? ` / Adzuna: ${diagnostics.adzunaHttpStatus}` : ''}
+                        </strong>
+                      </div>
+                      <div>
+                        <span className="text-slate-500 block text-[10px]">PAÍS / MERCADO:</span>
+                        <strong className="text-white uppercase">{diagnostics.countryCode || 'BR'}</strong>
+                      </div>
+                      <div className="col-span-2 sm:col-span-4">
+                        <span className="text-slate-500 block text-[10px]">QUERY / LOCALIZAÇÃO ENVIADAS:</span>
+                        <span className="text-slate-300">
+                          what: <strong className="text-white font-mono">{diagnostics.query}</strong> | where: <strong className="text-white font-mono">{diagnostics.location}</strong>
+                        </span>
+                      </div>
+                      <div className="col-span-2 sm:col-span-4">
                         <span className="text-slate-500 block text-[10px]">STATUS DE ERRO:</span>
                         <strong className={diagnostics.adzuna.error ? 'text-rose-400' : 'text-emerald-400'}>
-                          {diagnostics.adzuna.error || 'Nenhum erro'}
+                          {diagnostics.adzuna.error || 'Nenhum erro (Adzuna operacional)'}
                         </strong>
                       </div>
                     </div>
@@ -590,7 +852,7 @@ export default function App() {
 
                 {/* Section 2: GREENHOUSE */}
                 {diagnostics.greenhouse && (
-                  <div className="space-y-1 pt-2 border-t border-slate-800">
+                  <div className="space-y-1.5 pt-2 border-t border-slate-800">
                     <span className="text-indigo-400 font-bold text-[10px] block uppercase">GREENHOUSE JOB BOARDS</span>
                     <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 text-slate-300">
                       <div>
@@ -615,7 +877,55 @@ export default function App() {
                   </div>
                 )}
 
-                {/* Section 3: GLOBAL */}
+                {/* Section 3: LOCATION FILTER */}
+                {diagnostics.locationFilter && (
+                  <div className="space-y-1.5 pt-2 border-t border-slate-800">
+                    <div className="flex items-center justify-between">
+                      <span className="text-amber-400 font-bold text-[10px] block uppercase">LOCATION FILTER</span>
+                      <span className="text-[10px] text-amber-300 font-bold">
+                        SEARCH LOCATION: {diagnostics.locationFilter.searchLocation}
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-2 sm:grid-cols-6 gap-2 text-slate-300 text-[10px]">
+                      <div>
+                        <span className="text-slate-500 block">BEFORE FILTER:</span>
+                        <span>Adzuna: <strong className="text-white">{diagnostics.locationFilter.sourceBefore.adzuna}</strong></span>
+                        <br />
+                        <span>GH: <strong className="text-white">{diagnostics.locationFilter.sourceBefore.greenhouse}</strong></span>
+                      </div>
+                      <div>
+                        <span className="text-slate-500 block">MATCHED LOCAL:</span>
+                        <span>Adzuna: <strong className="text-emerald-400">{diagnostics.locationFilter.matchedLocal.adzuna}</strong></span>
+                        <br />
+                        <span>GH: <strong className="text-emerald-400">{diagnostics.locationFilter.matchedLocal.greenhouse}</strong></span>
+                      </div>
+                      <div>
+                        <span className="text-slate-500 block">REMOTE BRAZIL:</span>
+                        <span>Adzuna: <strong className="text-emerald-400">{diagnostics.locationFilter.remoteBrazil.adzuna}</strong></span>
+                        <br />
+                        <span>GH: <strong className="text-emerald-400">{diagnostics.locationFilter.remoteBrazil.greenhouse}</strong></span>
+                      </div>
+                      <div>
+                        <span className="text-slate-500 block">LATAM REMOTE:</span>
+                        <span>Adzuna: <strong className="text-emerald-400">{diagnostics.locationFilter.latamRemote.adzuna}</strong></span>
+                        <br />
+                        <span>GH: <strong className="text-emerald-400">{diagnostics.locationFilter.latamRemote.greenhouse}</strong></span>
+                      </div>
+                      <div>
+                        <span className="text-slate-500 block">REJECTED BY LOC:</span>
+                        <span>Adzuna: <strong className="text-rose-400">{diagnostics.locationFilter.rejectedByLocation.adzuna}</strong></span>
+                        <br />
+                        <span>GH: <strong className="text-rose-400">{diagnostics.locationFilter.rejectedByLocation.greenhouse}</strong></span>
+                      </div>
+                      <div>
+                        <span className="text-slate-500 block">TOTAL AFTER FILTER:</span>
+                        <strong className="text-amber-400 text-xs">{diagnostics.locationFilter.totalAfter}</strong>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Section 4: GLOBAL */}
                 {diagnostics.global && (
                   <div className="space-y-1 pt-2 border-t border-slate-800">
                     <span className="text-emerald-400 font-bold text-[10px] block uppercase">PIPELINE GLOBAL</span>
@@ -742,6 +1052,23 @@ export default function App() {
                 </select>
               </div>
 
+              {/* Apply Priority Filter */}
+              <div className="flex items-center gap-1 bg-purple-50 border border-purple-200 px-2.5 py-1 rounded-md">
+                <Sparkles className="w-3 h-3 text-purple-600" />
+                <select
+                  id="filter-priority-select"
+                  value={priorityFilter}
+                  onChange={(e) => setPriorityFilter(e.target.value)}
+                  className="bg-transparent text-purple-900 focus:outline-none font-bold cursor-pointer text-xs"
+                >
+                  <option value="ALL">Apply Priority: Todos</option>
+                  <option value="APPLY_NOW">⚡ APPLY NOW (90+)</option>
+                  <option value="HIGH_PRIORITY">🔥 HIGH PRIORITY (80-89)</option>
+                  <option value="REVIEW">🔍 REVIEW (65-79)</option>
+                  <option value="NOT_ELIGIBLE">⛔ NOT ELIGIBLE</option>
+                </select>
+              </div>
+
               {/* Workplace filter */}
               <div className="flex items-center gap-1 bg-slate-50 border border-slate-200 px-2.5 py-1 rounded-md">
                 <Filter className="w-3 h-3 text-slate-500" />
@@ -764,17 +1091,18 @@ export default function App() {
                 <select
                   id="sort-jobs-select"
                   value={sortBy}
-                  onChange={(e) => setSortBy(e.target.value as 'score' | 'title' | 'company')}
+                  onChange={(e) => setSortBy(e.target.value as 'score' | 'applyPriority' | 'title' | 'company')}
                   className="bg-transparent text-slate-700 focus:outline-none font-semibold cursor-pointer text-xs"
                 >
-                  <option value="score">Ordenar: Maior Score</option>
+                  <option value="applyPriority">Ordenar: Maior Apply Priority ⚡</option>
+                  <option value="score">Ordenar: Maior Match Score</option>
                   <option value="title">Ordenar: Cargo</option>
                   <option value="company">Ordenar: Empresa</option>
                 </select>
               </div>
 
               {/* Reset button */}
-              {(localSearchTerm || activeStatFilter !== 'all' || workplaceFilter !== 'all' || statusFilter !== 'ALL' || searchMinScore > 0) && (
+              {(localSearchTerm || activeStatFilter !== 'all' || workplaceFilter !== 'all' || statusFilter !== 'ALL' || priorityFilter !== 'ALL' || searchMinScore > 0) && (
                 <button
                   id="reset-filters-btn"
                   onClick={handleResetFilters}

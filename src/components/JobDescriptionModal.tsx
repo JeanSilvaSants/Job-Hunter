@@ -1,6 +1,7 @@
 import React from 'react';
-import { X, Building2, MapPin, DollarSign, Calendar, ExternalLink, Briefcase } from 'lucide-react';
+import { X, Building2, MapPin, DollarSign, Calendar, ExternalLink, Briefcase, Zap, AlertTriangle, AlertOctagon, CheckCircle2 } from 'lucide-react';
 import { JobWithAnalysis } from '../types';
+import { calculateApplyPriority } from '../services/applyPriority';
 
 interface JobDescriptionModalProps {
   job: JobWithAnalysis | null;
@@ -14,6 +15,9 @@ export const JobDescriptionModal: React.FC<JobDescriptionModalProps> = ({
   onOpenAnalysis,
 }) => {
   if (!job) return null;
+
+  const applyPriority = calculateApplyPriority(job);
+  const { score, classification, breakdown, reasons, warnings, blockers } = applyPriority;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 bg-slate-900/60 backdrop-blur-xs overflow-y-auto">
@@ -62,7 +66,112 @@ export const JobDescriptionModal: React.FC<JobDescriptionModalProps> = ({
 
         {/* Modal Body */}
         <div className="p-4 space-y-4">
-          
+
+          {/* APPLY PRIORITY ENGINE SECTION */}
+          <div className="bg-purple-50/70 border border-purple-200 rounded-lg p-4 space-y-3">
+            <div className="flex items-center justify-between border-b border-purple-200 pb-2.5">
+              <div className="flex items-center gap-2">
+                <div className="p-1.5 bg-purple-600 text-white rounded-md">
+                  <Zap className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-xs font-black uppercase tracking-wider text-purple-900">
+                    Apply Priority Engine
+                  </h3>
+                  <p className="text-[11px] text-purple-700 font-medium">
+                    Prioridade de candidatura calculada agora (decoupled do Match Score)
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <span className="text-2xl font-black text-purple-900">{score}/100</span>
+                <span className="text-xs font-black uppercase tracking-wider px-2.5 py-1 rounded-md bg-purple-600 text-white shadow-2xs">
+                  {classification}
+                </span>
+              </div>
+            </div>
+
+            {/* Breakdown Grid */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+              <div className="bg-white/80 p-2 rounded border border-purple-100 flex flex-col">
+                <span className="text-[10px] text-slate-500 font-semibold">Match Quality</span>
+                <span className="font-bold text-slate-800">{breakdown.matchComponent} / 30</span>
+              </div>
+              <div className="bg-white/80 p-2 rounded border border-purple-100 flex flex-col">
+                <span className="text-[10px] text-slate-500 font-semibold">ATS Coverage</span>
+                <span className="font-bold text-slate-800">{breakdown.atsComponent} / 15</span>
+              </div>
+              <div className="bg-white/80 p-2 rounded border border-purple-100 flex flex-col">
+                <span className="text-[10px] text-slate-500 font-semibold">Recency</span>
+                <span className="font-bold text-slate-800">{breakdown.recencyComponent} / 15</span>
+              </div>
+              <div className="bg-white/80 p-2 rounded border border-purple-100 flex flex-col">
+                <span className="text-[10px] text-slate-500 font-semibold">Geography</span>
+                <span className="font-bold text-slate-800">{breakdown.geographyComponent} / 10</span>
+              </div>
+              <div className="bg-white/80 p-2 rounded border border-purple-100 flex flex-col">
+                <span className="text-[10px] text-slate-500 font-semibold">Role Fit</span>
+                <span className="font-bold text-slate-800">{breakdown.roleFitComponent} / 10</span>
+              </div>
+              <div className="bg-white/80 p-2 rounded border border-purple-100 flex flex-col">
+                <span className="text-[10px] text-slate-500 font-semibold">Critical Gaps</span>
+                <span className="font-bold text-slate-800">{breakdown.criticalGapsComponent} / 10</span>
+              </div>
+              <div className="bg-white/80 p-2 rounded border border-purple-100 flex flex-col">
+                <span className="text-[10px] text-slate-500 font-semibold">Source Quality</span>
+                <span className="font-bold text-slate-800">{breakdown.sourceComponent} / 5</span>
+              </div>
+              <div className="bg-white/80 p-2 rounded border border-purple-100 flex flex-col">
+                <span className="text-[10px] text-slate-500 font-semibold">Urgency</span>
+                <span className="font-bold text-slate-800">{breakdown.urgencyComponent} / 5</span>
+              </div>
+            </div>
+
+            {/* Blockers */}
+            {blockers.length > 0 && (
+              <div className="bg-rose-50 border border-rose-200 rounded p-2.5 space-y-1 text-xs text-rose-900 font-medium">
+                <div className="font-bold text-rose-800 flex items-center gap-1">
+                  <AlertOctagon className="w-3.5 h-3.5 text-rose-600" />
+                  BLOCKER DETECTED
+                </div>
+                {blockers.map((b, i) => (
+                  <p key={i}>{b}</p>
+                ))}
+              </div>
+            )}
+
+            {/* Reasons */}
+            {reasons.length > 0 && (
+              <div className="space-y-1 text-xs text-purple-950">
+                <span className="font-bold uppercase tracking-wider text-[10px] text-purple-800">Por que aplicar agora?</span>
+                <ul className="space-y-0.5">
+                  {reasons.map((r, i) => (
+                    <li key={i} className="flex items-center gap-1.5 font-medium">
+                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                      {r}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {/* Warnings */}
+            {warnings.length > 0 && (
+              <div className="space-y-1 text-xs text-amber-900">
+                <span className="font-bold uppercase tracking-wider text-[10px] text-amber-800">Alertas de Atenção:</span>
+                <ul className="space-y-0.5">
+                  {warnings.map((w, i) => (
+                    <li key={i} className="flex items-center gap-1.5 font-medium">
+                      <AlertTriangle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                      {w}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
+
           {/* Requirements Section */}
           <div className="bg-slate-50 border border-slate-200 rounded-lg p-3.5">
             <h3 className="text-xs font-bold uppercase tracking-wider text-slate-700 mb-2 flex items-center gap-1.5">
@@ -126,9 +235,10 @@ export const JobDescriptionModal: React.FC<JobDescriptionModalProps> = ({
                 onClose();
                 onOpenAnalysis(job);
               }}
-              className="px-4 py-1.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-md text-xs transition shadow-2xs cursor-pointer"
+              className="px-4 py-1.5 bg-purple-600 hover:bg-purple-700 text-white font-bold rounded-md text-xs transition shadow-2xs cursor-pointer flex items-center gap-1.5"
             >
-              Ver Análise Detalhada
+              <Zap className="w-3.5 h-3.5" />
+              <span>PREPARAR CANDIDATURA</span>
             </button>
           </div>
         </div>

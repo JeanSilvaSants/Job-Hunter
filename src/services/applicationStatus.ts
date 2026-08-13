@@ -1,9 +1,22 @@
-import { Job, ApplicationStatus, ApplicationDetails, ApplicationEvent, ApplicationEventType } from '../types';
+import { Job, ApplicationStatus, ApplicationDetails, ApplicationEvent, ApplicationEventType, JobWithAnalysis } from '../types';
 import { syncApplicationStatus, syncApplicationEvent } from './cloudSync';
+import { calculateApplyPriority } from './applyPriority';
 
 export const LOCAL_STORAGE_KEY = 'job_hunter_application_status_v1';
 export const LOCAL_STORAGE_DETAILS_KEY = 'job_hunter_application_details_v1';
 export const LOCAL_STORAGE_EVENTS_KEY = 'job_hunter_application_events_v1';
+export const LOCAL_STORAGE_JOBS_KEY = 'job_hunter_restored_jobs_v1';
+
+export function toSafeISOString(val: any): string {
+  if (!val) return new Date().toISOString();
+  try {
+    const d = new Date(val);
+    if (isNaN(d.getTime())) return new Date().toISOString();
+    return d.toISOString();
+  } catch {
+    return new Date().toISOString();
+  }
+}
 
 export const STATUS_LABELS: Record<ApplicationStatus, string> = {
   NEW: 'Nova',
@@ -138,6 +151,51 @@ export function saveStoredEvents(events: ApplicationEvent[]): void {
 }
 
 /**
+ * Loads stored restored jobs from localStorage.
+ */
+export function getStoredRestoredJobs(): JobWithAnalysis[] {
+  if (typeof window === 'undefined' || !window.localStorage) {
+    return [];
+  }
+
+  try {
+    const raw = localStorage.getItem(LOCAL_STORAGE_JOBS_KEY);
+    if (!raw) return [];
+    return JSON.parse(raw);
+  } catch (err) {
+    console.error('Error reading restored jobs from localStorage:', err);
+    return [];
+  }
+}
+
+/**
+ * Saves restored jobs list to localStorage (merging with existing).
+ */
+export function saveRestoredJobs(newJobs: JobWithAnalysis[]): void {
+  if (typeof window === 'undefined' || !window.localStorage) return;
+
+  try {
+    const current = getStoredRestoredJobs();
+    const map = new Map<string, JobWithAnalysis>();
+    
+    current.forEach((j) => {
+      const key = getJobStableId(j);
+      map.set(key, j);
+    });
+
+    newJobs.forEach((j) => {
+      const key = getJobStableId(j);
+      map.set(key, j);
+    });
+
+    const merged = Array.from(map.values());
+    localStorage.setItem(LOCAL_STORAGE_JOBS_KEY, JSON.stringify(merged));
+  } catch (err) {
+    console.error('Error saving restored jobs to localStorage:', err);
+  }
+}
+
+/**
  * Calculates days spent in the current stage for an application.
  */
 export function getDaysInCurrentStage(app: ApplicationDetails): number {
@@ -188,25 +246,97 @@ export function getDaysSinceApplied(app: ApplicationDetails): number | null {
 }
 
 /**
+ * Resolves candidate keys for a job to match local details and statuses across key format variations.
+ */
+export function getCandidateJobKeys(job: Job): string[] {
+  const keys = new Set<string>();
+  
+  // 1. Primary stable ID (normalized URL without protocol / hostname+path, or comp_title_loc)
+  const stableId = getJobStableId(job);
+  if (stableId) keys.add(stableId);
+
+  // 2. Job UUID / ID
+  if (job.id) keys.add(job.id);
+
+  // 3. Raw URL
+  if (job.url) {
+    keys.add(job.url);
+    keys.add(job.url.toLowerCase().trim());
+    try {
+      let cleanUrl = job.url.trim().toLowerCase().split('?')[0].split('#')[0];
+      if (cleanUrl.endsWith('/')) cleanUrl = cleanUrl.slice(0, -1);
+      keys.add(cleanUrl);
+    } catch {
+      // ignore
+    }
+  }
+
+  // 4. Company|Title|Location
+  const comp = (job.company || '').trim().toLowerCase();
+  const tit = (job.title || '').trim().toLowerCase();
+  const loc = (job.location || '').trim().toLowerCase();
+  if (comp || tit) {
+    keys.add(`${comp}|${tit}|${loc}`);
+    keys.add(`${comp}_${tit}_${loc}`);
+  }
+
+  return Array.from(keys);
+}
+
+/**
  * Gets application details for a specific job, generating default if not present.
+ * Uses multi-candidate key matching to eliminate key format mismatches.
  */
 export function getApplicationDetails(job: Job): ApplicationDetails {
-  const stableId = getJobStableId(job);
+  const primaryKey = getJobStableId(job);
+  const candidateKeys = getCandidateJobKeys(job);
   const detailsMap = getStoredDetails();
   const statusMap = getStoredStatuses();
-  const status = statusMap[stableId] || job.status || 'NEW';
 
-  if (detailsMap[stableId]) {
-    return {
-      ...detailsMap[stableId],
-      status, // Ensure status is aligned
+  // Find existing details under any candidate key
+  let foundDetails: ApplicationDetails | null = null;
+  let matchedKey: string | null = null;
+
+  for (const candidateKey of candidateKeys) {
+    if (detailsMap[candidateKey]) {
+      foundDetails = detailsMap[candidateKey];
+      matchedKey = candidateKey;
+      break;
+    }
+  }
+
+  // Find status under any candidate key
+  let status: ApplicationStatus = job.status || 'NEW';
+  for (const candidateKey of candidateKeys) {
+    if (statusMap[candidateKey]) {
+      status = statusMap[candidateKey];
+      break;
+    }
+  }
+
+  if (foundDetails) {
+    const resolved: ApplicationDetails = {
+      ...foundDetails,
+      jobId: job.id || foundDetails.jobId || primaryKey,
+      jobKey: primaryKey,
+      status: status !== 'NEW' ? status : foundDetails.status,
     };
+
+    // Auto-alias to primaryKey if stored under a non-primary candidate key
+    if (matchedKey && matchedKey !== primaryKey) {
+      detailsMap[primaryKey] = resolved;
+      statusMap[primaryKey] = resolved.status;
+      saveDetailsMap(detailsMap);
+      saveStatusMap(statusMap);
+    }
+
+    return resolved;
   }
 
   const now = new Date().toISOString();
   const defaultDetails: ApplicationDetails = {
-    jobId: job.id,
-    jobKey: stableId,
+    jobId: job.id || primaryKey,
+    jobKey: primaryKey,
     status,
     work_model: job.workplaceType,
     last_activity_at: now,
@@ -223,12 +353,19 @@ export function getApplicationDetails(job: Job): ApplicationDetails {
 }
 
 /**
- * Gets status for a specific job.
+ * Gets status for a specific job using multi-candidate key lookup.
  */
 export function getJobStatus(job: Job): ApplicationStatus {
   const map = getStoredStatuses();
-  const stableId = getJobStableId(job);
-  return map[stableId] || job.status || 'NEW';
+  const candidateKeys = getCandidateJobKeys(job);
+
+  for (const key of candidateKeys) {
+    if (map[key]) {
+      return map[key];
+    }
+  }
+
+  return job.status || 'NEW';
 }
 
 /**
@@ -264,7 +401,16 @@ export function setJobStatus(job: Job, newStatus: ApplicationStatus, notes?: str
 
   // Preserve previous timestamps while setting the timestamp for the new status
   if (newStatus === 'PREPARED' && !updatedDetails.prepared_at) updatedDetails.prepared_at = now;
-  if (newStatus === 'APPLIED' && !updatedDetails.applied_at) updatedDetails.applied_at = now;
+  if (newStatus === 'APPLIED') {
+    if (!updatedDetails.applied_at) updatedDetails.applied_at = now;
+    if (updatedDetails.apply_priority_at_application === undefined || updatedDetails.apply_priority_at_application === null) {
+      const matchScore = (job as JobWithAnalysis).analysis?.score ?? 0;
+      const priorityRes = calculateApplyPriority(job);
+      updatedDetails.apply_priority_at_application = priorityRes.score;
+      updatedDetails.match_score_at_application = Math.round(matchScore);
+      updatedDetails.ats_coverage_at_application = Math.round(matchScore);
+    }
+  }
   if (newStatus === 'INTERVIEW' && !updatedDetails.interview_at) updatedDetails.interview_at = now;
   if (newStatus === 'REJECTED' && !updatedDetails.rejected_at) updatedDetails.rejected_at = now;
   if (newStatus === 'OFFER' && !updatedDetails.offer_at) updatedDetails.offer_at = now;
@@ -276,6 +422,13 @@ export function setJobStatus(job: Job, newStatus: ApplicationStatus, notes?: str
   let autoEvent: ApplicationEvent | null = null;
   if (oldStatus !== newStatus) {
     const eventKey = `status_change_${stableId}_${oldStatus}_${newStatus}_${Date.now()}`;
+    const eventMetadata: Record<string, any> = {};
+    if (newStatus === 'APPLIED') {
+      eventMetadata.matchScore = updatedDetails.match_score_at_application;
+      eventMetadata.applyPriority = updatedDetails.apply_priority_at_application;
+      eventMetadata.atsCoverage = updatedDetails.ats_coverage_at_application;
+    }
+
     autoEvent = {
       id: typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `event_${Date.now()}`,
       application_id: existingDetails.id || stableId,
@@ -284,6 +437,7 @@ export function setJobStatus(job: Job, newStatus: ApplicationStatus, notes?: str
       to_status: newStatus,
       event_type: 'STATUS_CHANGE',
       notes: notes || null,
+      metadata: eventMetadata,
       event_key: eventKey,
       created_at: now,
     };
@@ -373,6 +527,35 @@ export function addManualApplicationEvent(
   });
 
   return newEvent;
+}
+
+/**
+ * Quick Action: Marks a follow-up as sent.
+ * Creates a FOLLOW_UP_SENT event and updates last_activity_at.
+ */
+export function markFollowUpSent(job: Job, notes?: string): ApplicationEvent {
+  return addManualApplicationEvent(
+    job,
+    'FOLLOW_UP_SENT',
+    notes || 'Follow-up enviado'
+  );
+}
+
+/**
+ * Sets snooze timestamp for follow-up notifications on a job.
+ */
+export function setFollowUpSnooze(job: Job, snoozedUntilIso: string | null): ApplicationDetails {
+  return updateApplicationDetails(job, { follow_up_snoozed_until: snoozedUntilIso });
+}
+
+/**
+ * Sets manual follow-up override on a job (AUTO, DO_NOT_FOLLOW_UP, FOLLOW_UP_LATER).
+ */
+export function setFollowUpOverride(
+  job: Job,
+  override: 'AUTO' | 'DO_NOT_FOLLOW_UP' | 'FOLLOW_UP_LATER'
+): ApplicationDetails {
+  return updateApplicationDetails(job, { follow_up_override: override });
 }
 
 

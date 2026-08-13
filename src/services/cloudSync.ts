@@ -8,10 +8,20 @@ import {
   initSupabase,
   configDetails,
 } from './supabase';
-import { Job, JobWithAnalysis, ApplicationStatus, ApplicationDetails, ApplicationEvent } from '../types';
+import { Job, JobWithAnalysis, ApplicationStatus, ApplicationDetails, ApplicationEvent, WorkplaceType } from '../types';
 import { TailoredResume } from './resume';
 import { DEFAULT_GREENHOUSE_BOARDS, LOCAL_STORAGE_BOARDS_KEY } from '../data/jobBoards';
-import { LOCAL_STORAGE_KEY, LOCAL_STORAGE_DETAILS_KEY, LOCAL_STORAGE_EVENTS_KEY } from './applicationStatus';
+import {
+  LOCAL_STORAGE_KEY,
+  LOCAL_STORAGE_DETAILS_KEY,
+  LOCAL_STORAGE_EVENTS_KEY,
+  LOCAL_STORAGE_JOBS_KEY,
+  getJobStableId,
+  getStoredStatuses,
+  getStoredDetails,
+  getStoredEvents,
+  saveRestoredJobs,
+} from './applicationStatus';
 
 export interface CloudSyncDiagnostics {
   apiConfigStatus: string;
@@ -392,6 +402,11 @@ export async function syncApplicationStatus(
       application_url: appDetails.application_url !== undefined ? appDetails.application_url : existingApp?.application_url || null,
       next_step: appDetails.next_step !== undefined ? appDetails.next_step : existingApp?.next_step || null,
       next_step_date,
+      apply_priority_at_application: appDetails.apply_priority_at_application !== undefined ? appDetails.apply_priority_at_application : existingApp?.apply_priority_at_application || null,
+      match_score_at_application: appDetails.match_score_at_application !== undefined ? appDetails.match_score_at_application : existingApp?.match_score_at_application || null,
+      ats_coverage_at_application: appDetails.ats_coverage_at_application !== undefined ? appDetails.ats_coverage_at_application : existingApp?.ats_coverage_at_application || null,
+      follow_up_snoozed_until: appDetails.follow_up_snoozed_until !== undefined ? appDetails.follow_up_snoozed_until : existingApp?.follow_up_snoozed_until || null,
+      follow_up_override: appDetails.follow_up_override !== undefined ? appDetails.follow_up_override : existingApp?.follow_up_override || 'AUTO',
       updated_at: now,
     });
 
@@ -786,59 +801,143 @@ export async function restoreCloudData(): Promise<{
     const tailoredResumesMap: Record<string, TailoredResume> = {};
 
     const jobIdToKeyMap = new Map<string, string>();
+    const restoredJobsList: JobWithAnalysis[] = [];
+
+    // 1. Process jobs fetched from Supabase and calculate normalized stable keys
     (jobs || []).forEach((j) => {
-      jobIdToKeyMap.set(j.id, j.external_key);
-      if (j.url) jobIdToKeyMap.set(j.id, j.url);
-    });
+      const restoredJob: JobWithAnalysis = {
+        id: j.id,
+        title: j.title || 'Cargo sem título',
+        company: j.company || 'Empresa não informada',
+        location: j.location || '',
+        description: j.description || '',
+        url: j.url || '',
+        publishedAt: j.published_at || new Date().toISOString(),
+        workplaceType: (j.geo_classification === 'REMOTE' ? 'Remoto' : 'Híbrido') as WorkplaceType,
+        seniority: 'Pleno',
+        source: j.source || 'supabase',
+        requirements: [],
+        analysis: {
+          score: j.score || 0,
+          classification: j.score >= 90 ? 'Excelente' : j.score >= 80 ? 'Muito alta' : j.score >= 70 ? 'Boa' : 'Média',
+          breakdown: j.score_breakdown || { total: j.score || 0, titleScore: 0, skillsScore: 0, experienceScore: 0, toolsScore: 0, seniorityScore: 0, languageScore: 0, educationScore: 0, locationScore: 0, keywordsScore: 0 },
+          matchedSkills: j.matched_skills || [],
+          relatedSkills: j.related_skills || [],
+          missingSkills: j.missing_skills || [],
+          atsKeywords: j.ats_keywords || [],
+          matchReasons: j.match_reasons || [],
+          strengths: [],
+          gaps: [],
+          relevantExperienceSummary: [],
+        },
+      };
 
-    (apps || []).forEach((app) => {
-      const key = jobIdToKeyMap.get(app.job_id);
-      if (key) {
-        appliedMap[key] = app.status as ApplicationStatus;
-        detailsMap[key] = {
-          id: app.id,
-          jobId: app.job_id,
-          jobKey: key,
-          status: app.status as ApplicationStatus,
-          prepared_at: app.prepared_at,
-          applied_at: app.applied_at,
-          interview_at: app.interview_at,
-          rejected_at: app.rejected_at,
-          offer_at: app.offer_at,
-          last_activity_at: app.last_activity_at || app.updated_at || app.created_at,
-          notes: app.notes,
-          company_contact_name: app.company_contact_name,
-          company_contact_email: app.company_contact_email,
-          recruiter_name: app.recruiter_name,
-          recruiter_linkedin: app.recruiter_linkedin,
-          salary_expectation: app.salary_expectation,
-          salary_offered: app.salary_offered,
-          work_model: app.work_model,
-          application_channel: app.application_channel,
-          application_url: app.application_url,
-          next_step: app.next_step,
-          next_step_date: app.next_step_date,
-          created_at: app.created_at,
-          updated_at: app.updated_at,
-        };
+      const stableKey = getJobStableId(restoredJob);
+      restoredJobsList.push(restoredJob);
+
+      jobIdToKeyMap.set(j.id, stableKey);
+      if (j.external_key) jobIdToKeyMap.set(j.external_key, stableKey);
+      if (j.url) {
+        jobIdToKeyMap.set(j.url, stableKey);
+        jobIdToKeyMap.set(j.url.toLowerCase().trim(), stableKey);
       }
+      jobIdToKeyMap.set(stableKey, stableKey);
     });
 
-    // Save restored details to localStorage
+    // Save restored jobs to localStorage so Cockpit can reconstruct cards
+    if (restoredJobsList.length > 0) {
+      saveRestoredJobs(restoredJobsList);
+    }
+
+    // 2. Process applications, resolving candidate keys and preserving unresolved applications
+    (apps || []).forEach((app) => {
+      let key = jobIdToKeyMap.get(app.job_id) || jobIdToKeyMap.get(app.job_key);
+      let isUnresolved = false;
+
+      if (!key && app.application_url) {
+        try {
+          key = getJobStableId({ url: app.application_url, company: '', title: '' } as any);
+        } catch {
+          // ignore
+        }
+      }
+
+      if (!key) {
+        key = app.job_id || `UNRESOLVED_${app.id}`;
+        isUnresolved = true;
+      }
+
+      const appStatus = (app.status as ApplicationStatus) || 'NEW';
+      appliedMap[key] = appStatus;
+
+      const restoredDetail: ApplicationDetails = {
+        id: app.id,
+        jobId: app.job_id || key,
+        jobKey: key,
+        status: appStatus,
+        prepared_at: app.prepared_at,
+        applied_at: app.applied_at,
+        interview_at: app.interview_at,
+        rejected_at: app.rejected_at,
+        offer_at: app.offer_at,
+        last_activity_at: app.last_activity_at || app.updated_at || app.created_at,
+        notes: app.notes,
+        company_contact_name: app.company_contact_name,
+        company_contact_email: app.company_contact_email,
+        recruiter_name: app.recruiter_name,
+        recruiter_linkedin: app.recruiter_linkedin,
+        salary_expectation: app.salary_expectation,
+        salary_offered: app.salary_offered,
+        work_model: app.work_model,
+        application_channel: app.application_channel,
+        application_url: app.application_url,
+        next_step: app.next_step,
+        next_step_date: app.next_step_date,
+        apply_priority_at_application: app.apply_priority_at_application,
+        match_score_at_application: app.match_score_at_application,
+        ats_coverage_at_application: app.ats_coverage_at_application,
+        follow_up_snoozed_until: app.follow_up_snoozed_until,
+        follow_up_override: app.follow_up_override || 'AUTO',
+        created_at: app.created_at,
+        updated_at: app.updated_at,
+      };
+
+      detailsMap[key] = restoredDetail;
+
+      console.log(`[CloudSync Restore Audit] Restored application id=${app.id}, status=${appStatus}, resolvedKey=${key}, unresolved=${isUnresolved}`);
+    });
+
+    // 3. Perform a MERGE with local storage (preserving local data without overwrite)
     if (typeof window !== 'undefined' && window.localStorage) {
       try {
-        localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(appliedMap));
-        localStorage.setItem(LOCAL_STORAGE_DETAILS_KEY, JSON.stringify(detailsMap));
-        if (events && Array.isArray(events)) {
-          localStorage.setItem(LOCAL_STORAGE_EVENTS_KEY, JSON.stringify(events));
+        const localStatusMap = getStoredStatuses();
+        const localDetailsMap = getStoredDetails();
+        const localEvents = getStoredEvents();
+
+        const mergedStatusMap = { ...localStatusMap, ...appliedMap };
+        const mergedDetailsMap = { ...localDetailsMap, ...detailsMap };
+
+        localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(mergedStatusMap));
+        localStorage.setItem(LOCAL_STORAGE_DETAILS_KEY, JSON.stringify(mergedDetailsMap));
+
+        if (events && Array.isArray(events) && events.length > 0) {
+          const eventMap = new Map<string, any>();
+          localEvents.forEach((e) => {
+            if (e.id) eventMap.set(e.id, e);
+          });
+          events.forEach((e) => {
+            if (e.id) eventMap.set(e.id, e);
+          });
+          const mergedEvents = Array.from(eventMap.values());
+          localStorage.setItem(LOCAL_STORAGE_EVENTS_KEY, JSON.stringify(mergedEvents));
         }
       } catch (e) {
-        console.error('Error writing restored application details to localStorage:', e);
+        console.error('Error writing merged application details to localStorage:', e);
       }
     }
 
     (resumes || []).forEach((res) => {
-      const key = jobIdToKeyMap.get(res.job_id);
+      const key = jobIdToKeyMap.get(res.job_id) || res.job_id;
       if (key && res.resume_text) {
         try {
           tailoredResumesMap[key] = JSON.parse(res.resume_text);

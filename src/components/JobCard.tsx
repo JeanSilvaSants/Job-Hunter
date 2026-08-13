@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
-import { Building2, MapPin, CheckCircle2, AlertCircle, FileText, BarChart2, DollarSign, Calendar, ExternalLink, FileCheck2, Sparkles, Tag } from 'lucide-react';
+import { Building2, MapPin, CheckCircle2, AlertCircle, FileText, BarChart2, DollarSign, Calendar, ExternalLink, FileCheck2, Sparkles, Tag, Zap } from 'lucide-react';
 import { JobWithAnalysis, ApplicationStatus } from '../types';
 import { getFriendlyAgeLabel } from '../services/jobSources';
 import { getJobStatus, setJobStatus, STATUS_LABELS, STATUS_COLORS } from '../services/applicationStatus';
+import { calculateApplyPriority } from '../services/applyPriority';
 
 interface JobCardProps {
   job: JobWithAnalysis;
@@ -24,6 +25,8 @@ export const JobCard: React.FC<JobCardProps> = ({
   const { score, classification, matchedSkills, missingSkills } = job.analysis;
   const [currentStatus, setCurrentStatus] = useState<ApplicationStatus>(() => getJobStatus(job));
 
+  const applyPriority = calculateApplyPriority(job);
+
   const handleStatusSelect = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const newStatus = e.target.value as ApplicationStatus;
     setCurrentStatus(newStatus);
@@ -33,7 +36,7 @@ export const JobCard: React.FC<JobCardProps> = ({
     }
   };
 
-  // Badge styling according to score
+  // Match score badge styling
   let scoreBg = 'bg-slate-100 text-slate-700 border-slate-300';
   let badgeColor = 'bg-slate-100 text-slate-700 border-slate-200';
   let ringColor = 'border-slate-300';
@@ -66,6 +69,33 @@ export const JobCard: React.FC<JobCardProps> = ({
     leftAccent = 'border-l-4 border-l-rose-500';
   }
 
+  // Apply priority badge styling
+  let priorityBg = 'bg-purple-50';
+  let priorityText = 'text-purple-900';
+  let priorityBorder = 'border-purple-300';
+
+  if (applyPriority.classification === 'APPLY NOW') {
+    priorityBg = 'bg-purple-600';
+    priorityText = 'text-white';
+    priorityBorder = 'border-purple-700';
+  } else if (applyPriority.classification === 'HIGH PRIORITY') {
+    priorityBg = 'bg-indigo-100';
+    priorityText = 'text-indigo-900';
+    priorityBorder = 'border-indigo-300';
+  } else if (applyPriority.classification === 'REVIEW') {
+    priorityBg = 'bg-amber-100';
+    priorityText = 'text-amber-900';
+    priorityBorder = 'border-amber-300';
+  } else if (applyPriority.classification === 'NOT ELIGIBLE') {
+    priorityBg = 'bg-rose-100';
+    priorityText = 'text-rose-900';
+    priorityBorder = 'border-rose-300';
+  } else if (applyPriority.classification === 'ALREADY APPLIED') {
+    priorityBg = 'bg-blue-100';
+    priorityText = 'text-blue-900';
+    priorityBorder = 'border-blue-300';
+  }
+
   const isAdzuna = job.source === 'adzuna';
   const friendlyAge = getFriendlyAgeLabel(job.publishedAt);
   const statusStyle = STATUS_COLORS[currentStatus] || STATUS_COLORS.NEW;
@@ -76,7 +106,7 @@ export const JobCard: React.FC<JobCardProps> = ({
       className={`bg-white border border-slate-200 hover:border-blue-400 rounded-lg p-4 transition-all duration-150 shadow-2xs hover:shadow-xs flex flex-col justify-between group relative ${leftAccent}`}
     >
       <div>
-        {/* Header: Title, Company, Score */}
+        {/* Header: Title, Company, Scores */}
         <div className="flex items-start justify-between gap-3">
           <div className="space-y-1 flex-1">
             <div className="flex items-center flex-wrap gap-1.5">
@@ -96,6 +126,13 @@ export const JobCard: React.FC<JobCardProps> = ({
               ) : (
                 <span className="text-[10px] font-extrabold px-2 py-0.5 rounded bg-slate-100 text-slate-600 border border-slate-200 uppercase tracking-wider">
                   VAGA
+                </span>
+              )}
+
+              {/* Unresolved Badge */}
+              {job.isUnresolved && (
+                <span className="text-[10px] font-black px-2 py-0.5 rounded bg-amber-100 text-amber-900 border border-amber-300 uppercase tracking-wider flex items-center gap-1">
+                  UNRESOLVED APPLICATION
                 </span>
               )}
 
@@ -121,6 +158,12 @@ export const JobCard: React.FC<JobCardProps> = ({
                   ))}
                 </select>
               </div>
+
+              {/* Apply Priority Classification Tag */}
+              <span className={`text-[10px] font-black px-2 py-0.5 rounded border uppercase tracking-wider flex items-center gap-1 ${priorityBg} ${priorityText} ${priorityBorder}`}>
+                <Zap className="w-2.5 h-2.5" />
+                APPLY: {applyPriority.classification}
+              </span>
 
               <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${badgeColor}`}>
                 {classification}
@@ -155,16 +198,31 @@ export const JobCard: React.FC<JobCardProps> = ({
             </div>
           </div>
 
-          {/* High Density Score Badge */}
-          <div className="flex flex-col items-center justify-center shrink-0">
+          {/* Scores Badges: Match Score & Apply Priority */}
+          <div className="flex items-center gap-1.5 shrink-0">
+            {/* Match Score Badge */}
             <div
-              className={`w-14 h-14 rounded-lg border-2 flex flex-col items-center justify-center ${scoreBg} ${ringColor} shadow-2xs transition-transform group-hover:scale-105`}
+              className={`w-13 h-13 rounded-lg border-2 flex flex-col items-center justify-center ${scoreBg} ${ringColor} shadow-2xs transition-transform group-hover:scale-105`}
+              title={`Match Score — Compatibilidade técnica (${score}/100)`}
             >
-              <span className="text-2xl font-black tracking-tight leading-none">
+              <span className="text-lg font-black tracking-tight leading-none">
                 {score}
               </span>
-              <span className="text-[9px] uppercase font-bold tracking-wider opacity-90 mt-0.5">
-                PTS
+              <span className="text-[8px] uppercase font-black tracking-wider opacity-90 mt-0.5">
+                MATCH
+              </span>
+            </div>
+
+            {/* Apply Priority Badge */}
+            <div
+              className={`w-13 h-13 rounded-lg border-2 flex flex-col items-center justify-center ${priorityBg} ${priorityText} ${priorityBorder} shadow-2xs transition-transform group-hover:scale-105`}
+              title={`Apply Priority — ${applyPriority.classification} (${applyPriority.score}/100)`}
+            >
+              <span className="text-lg font-black tracking-tight leading-none">
+                {applyPriority.score}
+              </span>
+              <span className="text-[8px] uppercase font-black tracking-wider mt-0.5 opacity-90">
+                PRIORITY
               </span>
             </div>
           </div>

@@ -5,6 +5,7 @@ import { classifyGeo } from './geoClassifier';
 import { getStoredJobBoards } from '../data/jobBoards';
 import { fetchAllGreenhouseJobs } from './greenhouse';
 import { syncJobToSupabase } from './cloudSync';
+import { applySearchLocationFilter, LocationFilterMetrics } from './locationFilter';
 
 export interface SearchOptions {
   query?: string;
@@ -36,6 +37,9 @@ export interface DiagnosticsDetails {
     received: number;
     normalized: number;
     error?: string | null;
+    errorStage?: 'REQUEST' | 'BACKEND_PROXY' | 'ADZUNA_API' | 'RESPONSE_PARSE' | 'NORMALIZATION' | null;
+    adzunaHttpStatus?: number | null;
+    httpStatus?: number;
   };
   greenhouse: {
     boardsChecked: number;
@@ -45,7 +49,9 @@ export interface DiagnosticsDetails {
     brazilCompatible: number;
     error?: string | null;
   };
+  locationFilter: LocationFilterMetrics;
   global: {
+    beforeLocationFilter: number;
     beforeDeduplication: number;
     duplicatesRemoved: number;
     finalCount: number;
@@ -56,6 +62,8 @@ export interface DiagnosticsDetails {
 export interface AdzunaDiagnostics extends DiagnosticsDetails {
   statusCategory: string;
   httpStatus: number;
+  adzunaHttpStatus?: number | null;
+  errorStage?: 'REQUEST' | 'BACKEND_PROXY' | 'ADZUNA_API' | 'RESPONSE_PARSE' | 'NORMALIZATION' | null;
   statusText?: string;
   countryCode: string;
   query: string;
@@ -76,6 +84,7 @@ export interface SearchJobsResult {
   jobs: JobWithAnalysis[];
   error?: string;
   errorCode?: string;
+  errorStage?: 'REQUEST' | 'BACKEND_PROXY' | 'ADZUNA_API' | 'RESPONSE_PARSE' | 'NORMALIZATION' | null;
   diagnostics: AdzunaDiagnostics;
 }
 
@@ -245,8 +254,15 @@ export function normalizeAdzunaJob(item: AdzunaRawItem): Job {
 export async function fetchAdzunaRaw(
   query: string,
   location: string,
-  daysOld: number
-): Promise<{ ok: boolean; results?: AdzunaRawItem[]; data?: any; error?: string }> {
+  daysOld: number,
+  country: string = 'br'
+): Promise<{
+  ok: boolean;
+  results?: AdzunaRawItem[];
+  data?: any;
+  error?: string;
+  errorStage?: 'REQUEST' | 'BACKEND_PROXY' | 'ADZUNA_API' | 'RESPONSE_PARSE' | 'NORMALIZATION' | null;
+}> {
   try {
     const res = await fetch('/api/adzuna/search', {
       method: 'POST',
@@ -255,20 +271,59 @@ export async function fetchAdzunaRaw(
         query,
         location,
         daysOld,
-        country: 'br',
+        country: country || 'br',
       }),
     });
 
-    const data = await res.json().catch(() => ({
-      ok: false,
-      statusCategory: 'NETWORK_ERROR',
-      httpStatus: res.status || 500,
-      adzunaError: 'Resposta inválida do servidor backend.',
-    }));
+    let rawText = '';
+    try {
+      rawText = await res.text();
+    } catch (readErr: any) {
+      return {
+        ok: false,
+        errorStage: 'REQUEST',
+        error: `Falha ao ler resposta do backend (${res.status}): ${readErr.message || 'Stream error'}`,
+        data: {
+          ok: false,
+          httpStatus: res.status,
+          statusCategory: 'STREAM_ERROR',
+          errorStage: 'REQUEST',
+          countryCode: country,
+          query,
+          location,
+          daysOld,
+          adzunaError: `Falha na leitura da resposta (HTTP ${res.status})`,
+        },
+      };
+    }
+
+    let data: any = null;
+    try {
+      data = JSON.parse(rawText);
+    } catch (parseErr: any) {
+      const sanitizedSnippet = rawText.substring(0, 120).replace(/<[^>]*>?/gm, '').trim();
+      return {
+        ok: false,
+        errorStage: 'RESPONSE_PARSE',
+        error: `Backend retornou resposta não-JSON (HTTP ${res.status}): ${sanitizedSnippet || 'Erro de formato'}`,
+        data: {
+          ok: false,
+          httpStatus: res.status,
+          statusCategory: 'INVALID_JSON_RESPONSE',
+          errorStage: 'RESPONSE_PARSE',
+          countryCode: country,
+          query,
+          location,
+          daysOld,
+          adzunaError: `Backend retornou conteúdo não-JSON (HTTP ${res.status})`,
+        },
+      };
+    }
 
     if (!data.ok) {
       return {
         ok: false,
+        errorStage: data.errorStage || (data.statusCategory === 'MISSING_CREDENTIALS' ? 'BACKEND_PROXY' : 'ADZUNA_API'),
         data,
         error: data.adzunaError || data.message || `Erro na API (${data.statusCategory || data.httpStatus})`,
       };
@@ -278,7 +333,19 @@ export async function fetchAdzunaRaw(
   } catch (err: any) {
     return {
       ok: false,
-      error: 'Não foi possível conectar ao servidor backend do Job Hunter.',
+      errorStage: 'REQUEST',
+      error: `Não foi possível conectar ao servidor backend: ${err.message || 'Erro de rede'}`,
+      data: {
+        ok: false,
+        httpStatus: 0,
+        statusCategory: 'NETWORK_ERROR',
+        errorStage: 'REQUEST',
+        countryCode: country,
+        query,
+        location,
+        daysOld,
+        adzunaError: `Falha ao conectar com o servidor local: ${err.message || 'Erro de rede'}`,
+      },
     };
   }
 }
@@ -294,17 +361,19 @@ export async function searchRealJobs(
 
   const daysOld = options.daysOld || 30;
   const location = options.location || '';
+  const country = (options.country || 'br').toLowerCase().trim();
   const sourceFilter = options.sourceFilter || 'all';
 
   let adzunaRawItems: AdzunaRawItem[] = [];
   let adzunaApiError: string | undefined;
+  let adzunaErrorStage: 'REQUEST' | 'BACKEND_PROXY' | 'ADZUNA_API' | 'RESPONSE_PARSE' | 'NORMALIZATION' | null = null;
   let backendData: any = null;
 
   // 1. Fetch Adzuna Jobs (if sourceFilter is 'all' or 'adzuna')
   if (sourceFilter === 'all' || sourceFilter === 'adzuna') {
     if (options.searchAllTargets && userProfile.targetTitles && userProfile.targetTitles.length > 0) {
       const targetQueries = userProfile.targetTitles.slice(0, 3);
-      const fetchPromises = targetQueries.map((q) => fetchAdzunaRaw(q, location, daysOld));
+      const fetchPromises = targetQueries.map((q) => fetchAdzunaRaw(q, location, daysOld, country));
 
       const results = await Promise.all(fetchPromises);
 
@@ -314,16 +383,18 @@ export async function searchRealJobs(
           adzunaRawItems.push(...res.results);
         } else if (!adzunaApiError && res.error) {
           adzunaApiError = res.error;
+          adzunaErrorStage = res.errorStage || null;
         }
       }
     } else {
       const query = options.query || 'Customer Success';
-      const res = await fetchAdzunaRaw(query, location, daysOld);
+      const res = await fetchAdzunaRaw(query, location, daysOld, country);
       if (res.data) backendData = res.data;
       if (res.ok && res.results) {
         adzunaRawItems = res.results;
       } else {
         adzunaApiError = res.error;
+        adzunaErrorStage = res.errorStage || null;
       }
     }
   }
@@ -391,7 +462,7 @@ export async function searchRealJobs(
     return matchesTarget;
   });
 
-  // 3. Combine normalized jobs
+  // 3. Combine normalized jobs from all active sources
   const combinedAllJobs: Job[] = [...normalizedAdzunaJobs, ...relevantGhJobs];
 
   // Count Brazil-compatible Greenhouse jobs
@@ -400,19 +471,15 @@ export async function searchRealJobs(
     return geo === 'BRAZIL' || geo === 'REMOTE_BRAZIL' || geo === 'LATAM_COMPATIBLE';
   }).length;
 
-  // 4. Geographic Filtering (Strict Brazil Market Rules)
-  const geoFilteredJobs = combinedAllJobs.filter((job) => {
-    const geo = job.geoCategory || classifyGeo(job.location, job.description);
-
-    // Never show NOT_COMPATIBLE (e.g. US Only)
-    if (geo === 'NOT_COMPATIBLE') return false;
-
-    // Show INTERNATIONAL_UNKNOWN only if user checked "Include uncertain international eligibility"
-    if (geo === 'INTERNATIONAL_UNKNOWN' && !options.includeUncertainIntl) return false;
-
-    // BRAZIL, REMOTE_BRAZIL, LATAM_COMPATIBLE are shown by default
-    return true;
-  });
+  // 4. Geographic & Location Filtering (GeoClassifier + Search Location Filter)
+  const { filteredJobs: geoFilteredJobs, metrics: locationFilterMetrics } = applySearchLocationFilter(
+    combinedAllJobs,
+    location,
+    {
+      includeUncertainIntl: options.includeUncertainIntl,
+      countryCode: country,
+    }
+  );
 
   // 5. Global Deduplication
   const { uniqueJobs, duplicatesRemoved } = deduplicateJobs(geoFilteredJobs);
@@ -439,18 +506,19 @@ export async function searchRealJobs(
   });
 
   const endTime = performance.now();
-
   const latencyMs = Math.round(endTime - startTime);
 
   const diagnostics: AdzunaDiagnostics = {
     statusCategory: backendData?.statusCategory || (adzunaApiError ? 'ADZUNA_ERROR' : 'SUCCESS_WITH_RESULTS'),
     httpStatus: backendData?.httpStatus || 200,
+    adzunaHttpStatus: backendData?.adzunaHttpStatus ?? null,
+    errorStage: backendData?.errorStage || adzunaErrorStage,
     statusText: backendData?.statusText || 'OK',
-    countryCode: backendData?.countryCode || 'br',
+    countryCode: backendData?.countryCode || country || 'br',
     query: options.query || 'Customer Success',
     location: options.location || '—',
     daysOld: daysOld,
-    apiUrlSanitized: backendData?.apiUrlSanitized || 'https://api.adzuna.com/v1/api/jobs/br/search/1',
+    apiUrlSanitized: backendData?.apiUrlSanitized || `https://api.adzuna.com/v1/api/jobs/${country || 'br'}/search/1`,
     adzunaCount: backendData?.adzunaCount || 0,
     resultsReceived: adzunaRawItems.length,
     normalizedCount: normalizedAdzunaJobs.length,
@@ -464,6 +532,9 @@ export async function searchRealJobs(
       received: adzunaRawItems.length,
       normalized: normalizedAdzunaJobs.length,
       error: backendData?.adzunaError || adzunaApiError || null,
+      errorStage: backendData?.errorStage || adzunaErrorStage,
+      adzunaHttpStatus: backendData?.adzunaHttpStatus ?? null,
+      httpStatus: backendData?.httpStatus || 200,
     },
     greenhouse: {
       boardsChecked: ghBoardsChecked,
@@ -473,7 +544,9 @@ export async function searchRealJobs(
       brazilCompatible: ghBrazilCompatible,
       error: ghError,
     },
+    locationFilter: locationFilterMetrics,
     global: {
+      beforeLocationFilter: combinedAllJobs.length,
       beforeDeduplication: geoFilteredJobs.length,
       duplicatesRemoved,
       finalCount: jobsWithAnalysis.length,
@@ -488,6 +561,7 @@ export async function searchRealJobs(
       jobs: [],
       error: adzunaApiError,
       errorCode: backendData?.statusCategory || 'ADZUNA_ERROR',
+      errorStage: backendData?.errorStage || adzunaErrorStage,
       diagnostics,
     };
   }

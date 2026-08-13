@@ -65,9 +65,14 @@ export interface Job {
   salaryRange?: string;
   source?: 'mock' | 'adzuna' | 'greenhouse' | string;
   sources?: string[];
+  discovery_source?: string;
+  roleFamily?: string;
+  language?: string;
   geoCategory?: GeoCategory;
   status?: ApplicationStatus;
   resumeLanguageOverride?: 'auto' | 'pt-BR' | 'en';
+  isUnresolved?: boolean;
+  unresolvedReason?: string;
 }
 
 export interface ScoreBreakdown {
@@ -108,6 +113,75 @@ export interface JobAnalysis {
   gaps: string[];
   relevantExperienceSummary: string[];
   scoreCapApplied?: string | null;
+}
+
+export type ApplyPriorityClassification =
+  | 'APPLY NOW'
+  | 'HIGH PRIORITY'
+  | 'REVIEW'
+  | 'LOW PRIORITY'
+  | 'SKIP / VERY LOW'
+  | 'ALREADY APPLIED'
+  | 'IN INTERVIEW'
+  | 'OFFER'
+  | 'REJECTED'
+  | 'NOT ELIGIBLE'
+  | 'CLOSED';
+
+export interface ApplyPriorityBreakdown {
+  matchComponent: number;       // Max 30
+  atsComponent: number;         // Max 15
+  recencyComponent: number;     // Max 15
+  geographyComponent: number;   // Max 10
+  roleFitComponent: number;     // Max 10
+  criticalGapsComponent: number;// Max 10
+  sourceComponent: number;      // Max 5
+  urgencyComponent: number;     // Max 5
+  total: number;                // Max 100
+}
+
+export interface ApplyPriorityResult {
+  score: number;
+  classification: ApplyPriorityClassification;
+  breakdown: ApplyPriorityBreakdown;
+  reasons: string[];
+  warnings: string[];
+  blockers: string[];
+}
+
+export interface ApplyPriorityContext {
+  atsCoverage?: number;
+  sourceYield?: number | null;
+}
+
+export type FollowUpState =
+  | 'WAIT'
+  | 'FOLLOW_UP_SOON'
+  | 'FOLLOW_UP_RECOMMENDED'
+  | 'FOLLOW_UP_OVERDUE'
+  | 'INTERVIEW_SOON'
+  | 'NEXT_STEP_TODAY'
+  | 'NEXT_STEP_OVERDUE'
+  | 'PROCESS_ACTIVE'
+  | 'READY_TO_APPLY'
+  | 'NO_ACTION_NEEDED'
+  | 'CLOSED';
+
+export type FollowUpOverride = 'AUTO' | 'DO_NOT_FOLLOW_UP' | 'FOLLOW_UP_LATER';
+
+export interface FollowUpResult {
+  state: FollowUpState;
+  urgencyScore: number;
+  recommendedAction: string;
+  reason: string;
+  nextRecommendedDate?: string;
+  daysSinceApplied?: number;
+  daysSinceLastActivity?: number;
+  daysUntilNextStep?: number;
+  warnings: string[];
+  isSnoozed?: boolean;
+  snoozedUntil?: string | null;
+  override?: FollowUpOverride;
 }
 
 export interface JobWithAnalysis extends Job {
@@ -171,6 +245,11 @@ export interface ApplicationDetails {
   application_url?: string | null;
   next_step?: string | null;
   next_step_date?: string | null;
+  apply_priority_at_application?: number | null;
+  match_score_at_application?: number | null;
+  ats_coverage_at_application?: number | null;
+  follow_up_snoozed_until?: string | null;
+  follow_up_override?: FollowUpOverride;
   created_at?: string;
   updated_at?: string;
 }

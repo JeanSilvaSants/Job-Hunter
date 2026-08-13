@@ -20,7 +20,13 @@ import {
   Tag,
   ArrowRight,
   Globe,
-  Award
+  Award,
+  Bell,
+  Copy,
+  Check,
+  Moon,
+  Settings,
+  Send
 } from 'lucide-react';
 import {
   JobWithAnalysis,
@@ -28,7 +34,8 @@ import {
   ApplicationStatus,
   ApplicationDetails,
   ApplicationEvent,
-  ApplicationChannel
+  ApplicationChannel,
+  FollowUpOverride
 } from '../types';
 import {
   STATUS_LABELS,
@@ -38,8 +45,15 @@ import {
   updateApplicationDetails,
   getDaysInCurrentStage,
   getDaysSinceApplied,
-  getStoredEvents
+  getStoredEvents,
+  markFollowUpSent,
+  setFollowUpSnooze,
+  setFollowUpOverride
 } from '../services/applicationStatus';
+import {
+  calculateFollowUpState,
+  getFollowUpTemplate
+} from '../services/followUpIntelligence';
 import { getStoredTailoredResumes } from '../services/resume';
 import { AddApplicationEventModal } from './AddApplicationEventModal';
 
@@ -75,6 +89,8 @@ export const ApplicationDetailsModal: React.FC<ApplicationDetailsModalProps> = (
   const [events, setEvents] = useState<ApplicationEvent[]>([]);
   const [isAddEventOpen, setIsAddEventOpen] = useState(false);
   const [isSavingNotes, setIsSavingNotes] = useState(false);
+  const [showTemplateModal, setShowTemplateModal] = useState(false);
+  const [copiedText, setCopiedText] = useState(false);
 
   useEffect(() => {
     if (job) {
@@ -101,6 +117,9 @@ export const ApplicationDetailsModal: React.FC<ApplicationDetailsModalProps> = (
   const storedResumes = getStoredTailoredResumes();
   const tailoredResume = storedResumes[job.url] || null;
 
+  // Calculate Follow-Up Intelligence Result
+  const followUpResult = calculateFollowUpState(details, events, job);
+
   const handleStatusSelect = (newStatus: ApplicationStatus) => {
     setJobStatus(job, newStatus);
     const updated = getApplicationDetails(job);
@@ -108,6 +127,43 @@ export const ApplicationDetailsModal: React.FC<ApplicationDetailsModalProps> = (
     loadEventsForJob(job);
     onStatusChange();
   };
+
+  const handleMarkSent = () => {
+    markFollowUpSent(job, 'Follow-up registrado via botão de ação rápida');
+    const updated = getApplicationDetails(job);
+    setDetails(updated);
+    loadEventsForJob(job);
+    onStatusChange();
+  };
+
+  const handleSnooze = (days: number) => {
+    const date = new Date();
+    date.setDate(date.getDate() + days);
+    setFollowUpSnooze(job, date.toISOString());
+    const updated = getApplicationDetails(job);
+    setDetails(updated);
+    onStatusChange();
+  };
+
+  const handleOverride = (override: FollowUpOverride) => {
+    setFollowUpOverride(job, override);
+    const updated = getApplicationDetails(job);
+    setDetails(updated);
+    onStatusChange();
+  };
+
+  const handleCopyTemplate = (text: string) => {
+    navigator.clipboard.writeText(text);
+    setCopiedText(true);
+    setTimeout(() => setCopiedText(false), 2000);
+  };
+
+  const templateObj = getFollowUpTemplate(
+    job.title,
+    job.company,
+    details.recruiter_name,
+    tailoredResume?.resumeLanguage || job.language
+  );
 
   const handleFieldChange = (field: keyof ApplicationDetails, value: any) => {
     const updated = updateApplicationDetails(job, { [field]: value });
@@ -220,6 +276,200 @@ export const ApplicationDetailsModal: React.FC<ApplicationDetailsModalProps> = (
                   </div>
                 )}
               </div>
+            </div>
+
+            {/* FOLLOW-UP INTELLIGENCE SECTION (Phase 3.3) */}
+            <div className="bg-gradient-to-r from-slate-900 to-indigo-950 text-white p-4 rounded-xl shadow-md border border-slate-800 space-y-4">
+              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800/80 pb-3">
+                <div className="flex items-center gap-2">
+                  <Bell className="w-4 h-4 text-amber-400" />
+                  <h3 className="font-bold text-sm tracking-wide text-slate-100">
+                    FOLLOW-UP INTELLIGENCE
+                  </h3>
+                  {followUpResult.isSnoozed && (
+                    <span className="px-2 py-0.5 bg-purple-500/30 text-purple-200 border border-purple-500/40 rounded-full text-[10px] font-bold flex items-center gap-1">
+                      <Moon className="w-3 h-3" /> Snoozed
+                    </span>
+                  )}
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <span className={`px-2.5 py-1 rounded-lg text-xs font-extrabold uppercase border shadow-sm ${
+                    followUpResult.state === 'NEXT_STEP_OVERDUE' || followUpResult.state === 'FOLLOW_UP_OVERDUE'
+                      ? 'bg-rose-500/20 text-rose-300 border-rose-500/40'
+                      : followUpResult.state === 'NEXT_STEP_TODAY'
+                      ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
+                      : followUpResult.state === 'FOLLOW_UP_RECOMMENDED'
+                      ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+                      : followUpResult.state === 'INTERVIEW_SOON' || followUpResult.state === 'FOLLOW_UP_SOON'
+                      ? 'bg-indigo-500/20 text-indigo-300 border-indigo-500/40'
+                      : 'bg-slate-800 text-slate-300 border-slate-700'
+                  }`}>
+                    {followUpResult.state.replace(/_/g, ' ')}
+                  </span>
+                  <span className="px-2.5 py-1 bg-slate-800 border border-slate-700 text-amber-300 font-extrabold text-xs rounded-lg">
+                    Urgency: {followUpResult.urgencyScore}/100
+                  </span>
+                </div>
+              </div>
+
+              {/* Status Details & Recommended Action */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
+                <div className="bg-slate-800/60 p-2.5 rounded-lg border border-slate-700/60 space-y-1">
+                  <span className="text-slate-400 text-[10px] uppercase font-bold">Última Atividade</span>
+                  <p className="font-semibold text-slate-200">
+                    {followUpResult.daysSinceLastActivity !== undefined
+                      ? `Há ${followUpResult.daysSinceLastActivity} dia(s)`
+                      : 'Sem registro'}
+                  </p>
+                </div>
+
+                <div className="bg-slate-800/60 p-2.5 rounded-lg border border-slate-700/60 space-y-1">
+                  <span className="text-slate-400 text-[10px] uppercase font-bold">Dias desde Candidatura</span>
+                  <p className="font-semibold text-slate-200">
+                    {followUpResult.daysSinceApplied !== undefined
+                      ? `${followUpResult.daysSinceApplied} dia(s)`
+                      : 'Não candidatado'}
+                  </p>
+                </div>
+
+                <div className="bg-slate-800/60 p-2.5 rounded-lg border border-slate-700/60 space-y-1">
+                  <span className="text-slate-400 text-[10px] uppercase font-bold">Próxima Etapa</span>
+                  <p className="font-semibold text-slate-200">
+                    {followUpResult.daysUntilNextStep !== undefined
+                      ? followUpResult.daysUntilNextStep === 0
+                        ? 'Hoje!'
+                        : followUpResult.daysUntilNextStep < 0
+                        ? `Vencida há ${Math.abs(followUpResult.daysUntilNextStep)} dia(s)`
+                        : `Em ${followUpResult.daysUntilNextStep} dia(s)`
+                      : 'Sem data'}
+                  </p>
+                </div>
+              </div>
+
+              {/* Recommendation Box */}
+              <div className="bg-indigo-950/80 p-3 rounded-lg border border-indigo-800/70 space-y-1">
+                <div className="text-[10px] font-extrabold text-indigo-300 uppercase tracking-wide">
+                  Ação Recomendada
+                </div>
+                <p className="font-bold text-sm text-indigo-100">{followUpResult.recommendedAction}</p>
+                <p className="text-xs text-indigo-200/80">{followUpResult.reason}</p>
+              </div>
+
+              {/* Warnings if any */}
+              {followUpResult.warnings.length > 0 && (
+                <div className="bg-amber-500/10 border border-amber-500/30 p-2.5 rounded-lg text-amber-200 text-xs space-y-1">
+                  {followUpResult.warnings.map((w, i) => (
+                    <div key={i} className="flex items-center gap-1.5 font-medium">
+                      <AlertCircle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                      <span>{w}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Quick Action Controls */}
+              <div className="pt-2 border-t border-slate-800/80 flex flex-wrap items-center justify-between gap-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    onClick={handleMarkSent}
+                    className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-lg text-xs transition flex items-center gap-1.5 shadow-sm cursor-pointer"
+                  >
+                    <Send className="w-3.5 h-3.5" />
+                    <span>MARK FOLLOW-UP SENT</span>
+                  </button>
+
+                  <button
+                    onClick={() => setShowTemplateModal(!showTemplateModal)}
+                    className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-lg text-xs transition flex items-center gap-1.5 shadow-sm cursor-pointer"
+                  >
+                    <Copy className="w-3.5 h-3.5" />
+                    <span>COPIAR MENSAGEM</span>
+                  </button>
+                </div>
+
+                <div className="flex items-center gap-2 text-xs">
+                  {/* Snooze Dropdown */}
+                  <div className="flex items-center gap-1 bg-slate-800 border border-slate-700 px-2 py-1 rounded-lg">
+                    <Moon className="w-3 h-3 text-purple-400" />
+                    <select
+                      value=""
+                      onChange={(e) => {
+                        if (e.target.value) handleSnooze(Number(e.target.value));
+                      }}
+                      className="bg-transparent text-slate-200 font-semibold focus:outline-none cursor-pointer text-xs"
+                    >
+                      <option value="" className="bg-slate-900">Adiar (Snooze)</option>
+                      <option value="1" className="bg-slate-900">1 dia</option>
+                      <option value="3" className="bg-slate-900">3 dias</option>
+                      <option value="7" className="bg-slate-900">7 dias</option>
+                    </select>
+                  </div>
+
+                  {/* Override Dropdown */}
+                  <div className="flex items-center gap-1 bg-slate-800 border border-slate-700 px-2 py-1 rounded-lg">
+                    <Settings className="w-3 h-3 text-slate-400" />
+                    <select
+                      value={details.follow_up_override || 'AUTO'}
+                      onChange={(e) => handleOverride(e.target.value as FollowUpOverride)}
+                      className="bg-transparent text-slate-200 font-semibold focus:outline-none cursor-pointer text-xs"
+                    >
+                      <option value="AUTO" className="bg-slate-900">Modo Auto</option>
+                      <option value="DO_NOT_FOLLOW_UP" className="bg-slate-900">Não Acompanhar</option>
+                      <option value="FOLLOW_UP_LATER" className="bg-slate-900">Acompanhar Depois</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              {/* Template Drawer / Modal inside details */}
+              {showTemplateModal && (
+                <div className="bg-slate-800 p-3 rounded-lg border border-slate-700 space-y-3 animate-in fade-in duration-150">
+                  <div className="flex items-center justify-between text-xs font-bold text-slate-200">
+                    <span>Modelo de Mensagem de Follow-up (Local)</span>
+                    <button
+                      onClick={() => setShowTemplateModal(false)}
+                      className="text-slate-400 hover:text-white"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+
+                  <div className="space-y-2">
+                    <div className="space-y-1">
+                      <div className="flex items-center justify-between text-[10px] font-bold text-slate-400 uppercase">
+                        <span>Português (pt-BR)</span>
+                        <button
+                          onClick={() => handleCopyTemplate(templateObj.ptBR)}
+                          className="text-indigo-400 hover:text-indigo-300 font-bold flex items-center gap-1 cursor-pointer"
+                        >
+                          {copiedText ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                          <span>{copiedText ? 'Copiado!' : 'Copiar'}</span>
+                        </button>
+                      </div>
+                      <p className="bg-slate-900 p-2.5 rounded border border-slate-700 text-slate-200 text-xs italic">
+                        {templateObj.ptBR}
+                      </p>
+                    </div>
+
+                    <div className="space-y-1">
+                      <div className="flex items-center justify-between text-[10px] font-bold text-slate-400 uppercase">
+                        <span>English (en-US)</span>
+                        <button
+                          onClick={() => handleCopyTemplate(templateObj.en)}
+                          className="text-indigo-400 hover:text-indigo-300 font-bold flex items-center gap-1 cursor-pointer"
+                        >
+                          {copiedText ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                          <span>{copiedText ? 'Copiado!' : 'Copiar'}</span>
+                        </button>
+                      </div>
+                      <p className="bg-slate-900 p-2.5 rounded border border-slate-700 text-slate-200 text-xs italic">
+                        {templateObj.en}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Operational Details Grid */}

@@ -26,10 +26,12 @@ async function startServer() {
     if (!appId || !appKey || appId.trim() === '' || appKey.trim() === '') {
       return {
         ok: false,
+        errorStage: 'BACKEND_PROXY',
         statusCategory: 'MISSING_CREDENTIALS',
         httpStatus: 400,
-        statusText: 'Bad Request',
-        apiUrlSanitized: 'https://api.adzuna.com/v1/api/jobs/br/search/1',
+        adzunaHttpStatus: null,
+        statusText: 'Bad Request (Missing Credentials)',
+        apiUrlSanitized: `https://api.adzuna.com/v1/api/jobs/${(options.country || 'br').toLowerCase().trim()}/search/${options.page || 1}?what=${encodeURIComponent(options.query || '')}&where=${encodeURIComponent(options.location || '')}`,
         countryCode: (options.country || 'br').toLowerCase().trim(),
         query: (options.query || '').trim() || '—',
         location: (options.location || '').trim() || '—',
@@ -38,7 +40,7 @@ async function startServer() {
         resultsPerPage: options.resultsPerPage || 50,
         adzunaCount: 0,
         resultsReceived: 0,
-        adzunaError: 'Credenciais da Adzuna (ADZUNA_APP_ID / ADZUNA_APP_KEY) não foram configuradas.',
+        adzunaError: 'Credenciais da Adzuna (ADZUNA_APP_ID / ADZUNA_APP_KEY) não foram configuradas nas variáveis de ambiente do servidor.',
         results: [],
       };
     }
@@ -96,27 +98,35 @@ async function startServer() {
       let adzunaError: string | null = null;
 
       if (!response.ok) {
-        const errorText = await response.text();
+        let errorText = '';
+        try {
+          errorText = await response.text();
+        } catch {}
         console.error(`Adzuna API Error (${response.status}):`, errorText);
 
         if (response.status === 401 || response.status === 403) {
           statusCategory = 'AUTH_ERROR';
-          adzunaError = `Erro de Autenticação (${response.status}): Verifique se ADZUNA_APP_ID e ADZUNA_APP_KEY são válidos.`;
+          adzunaError = `Erro de Autenticação na Adzuna (HTTP ${response.status}): Verifique se ADZUNA_APP_ID e ADZUNA_APP_KEY são válidos.`;
         } else if (response.status === 429) {
           statusCategory = 'RATE_LIMIT';
-          adzunaError = 'Limite de requisições atingido na API da Adzuna (Rate Limit 429).';
+          adzunaError = 'Limite de requisições atingido na API da Adzuna (Rate Limit 429). Tente novamente mais tarde.';
         } else if (response.status === 400) {
           statusCategory = 'BAD_REQUEST';
-          adzunaError = `Parâmetros inválidos enviados para a Adzuna (${response.status}).`;
+          adzunaError = `Parâmetros inválidos enviados para a Adzuna (HTTP ${response.status}).`;
+        } else if (response.status === 404) {
+          statusCategory = 'NOT_FOUND';
+          adzunaError = `Endpoint ou mercado '${countryCode}' não encontrado na Adzuna (HTTP 404).`;
         } else {
           statusCategory = 'ADZUNA_ERROR';
-          adzunaError = `Erro HTTP ${response.status} da Adzuna: ${response.statusText}`;
+          adzunaError = `Erro HTTP ${response.status} retornado pela Adzuna: ${response.statusText || 'Erro no provedor'}`;
         }
 
         return {
           ok: false,
+          errorStage: 'ADZUNA_API',
           statusCategory,
-          httpStatus: response.status,
+          httpStatus: 200, // proxy handled gracefully
+          adzunaHttpStatus: response.status,
           statusText: response.statusText,
           apiUrlSanitized: sanitizedUrl,
           countryCode,
@@ -132,7 +142,31 @@ async function startServer() {
         };
       }
 
-      data = await response.json();
+      const rawText = await response.text();
+      try {
+        data = JSON.parse(rawText);
+      } catch (parseErr: any) {
+        return {
+          ok: false,
+          errorStage: 'RESPONSE_PARSE',
+          statusCategory: 'RESPONSE_PARSE_ERROR',
+          httpStatus: 200,
+          adzunaHttpStatus: response.status,
+          statusText: 'Invalid JSON from Adzuna',
+          apiUrlSanitized: sanitizedUrl,
+          countryCode,
+          query: cleanQuery || '—',
+          location: cleanLocation || '—',
+          daysOld,
+          page,
+          resultsPerPage,
+          adzunaCount: 0,
+          resultsReceived: 0,
+          adzunaError: 'A Adzuna retornou uma resposta não-JSON ou corrompida.',
+          results: [],
+        };
+      }
+
       const count = data.count || 0;
       const results = data.results || [];
 
@@ -144,8 +178,10 @@ async function startServer() {
 
       return {
         ok: true,
+        errorStage: null,
         statusCategory,
-        httpStatus: response.status,
+        httpStatus: 200,
+        adzunaHttpStatus: response.status,
         statusText: response.statusText,
         apiUrlSanitized: sanitizedUrl,
         countryCode,
@@ -163,8 +199,10 @@ async function startServer() {
       console.error('Network/Server Exception querying Adzuna:', err);
       return {
         ok: false,
+        errorStage: 'BACKEND_PROXY',
         statusCategory: 'NETWORK_ERROR',
         httpStatus: 500,
+        adzunaHttpStatus: null,
         statusText: 'Internal Server Error',
         apiUrlSanitized: sanitizedUrl,
         countryCode,
