@@ -33,7 +33,11 @@ export interface AdzunaRawItem {
 }
 
 export interface DiagnosticsDetails {
+  runtimeBackend?: string;
+  runtimeSearchHandler?: string;
+  locationFilterRuntime?: string;
   adzuna?: {
+    runtimeBackend?: string;
     clientEndpoint?: string;
     backendHandler?: string;
     credentialsStatus?: { appId: string; appKey: string };
@@ -63,6 +67,9 @@ export interface DiagnosticsDetails {
 }
 
 export interface AdzunaDiagnostics extends DiagnosticsDetails {
+  runtimeBackend?: string;
+  runtimeSearchHandler?: string;
+  locationFilterRuntime?: string;
   clientEndpoint?: string;
   backendHandler?: string;
   credentialsStatus?: { appId: string; appKey: string };
@@ -541,6 +548,9 @@ export async function searchRealJobs(
   const latencyMs = Math.round(endTime - startTime);
 
   const diagnostics: AdzunaDiagnostics = {
+    runtimeSearchHandler: 'SEARCH-HANDLER-V2',
+    runtimeBackend: backendData?.runtimeBackend || 'ADZUNA-BACKEND-V2',
+    locationFilterRuntime: locationFilterMetrics.locationFilterRuntime || 'LOCATION-FILTER-V2',
     clientEndpoint: backendData?.clientEndpoint || '/api/adzuna/search',
     backendHandler: backendData?.backendHandler || 'server.ts:queryAdzuna',
     credentialsStatus: backendData?.credentialsStatus,
@@ -564,6 +574,7 @@ export async function searchRealJobs(
 
     // Expanded Multi-Source Diagnostics
     adzuna: {
+      runtimeBackend: backendData?.runtimeBackend || 'ADZUNA-BACKEND-V2',
       clientEndpoint: backendData?.clientEndpoint || '/api/adzuna/search',
       backendHandler: backendData?.backendHandler || 'server.ts:queryAdzuna',
       credentialsStatus: backendData?.credentialsStatus,

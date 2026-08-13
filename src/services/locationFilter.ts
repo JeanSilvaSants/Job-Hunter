@@ -2,6 +2,7 @@ import { Job } from '../types';
 import { classifyGeo, GeoCategory } from './geoClassifier';
 
 export interface LocationFilterMetrics {
+  locationFilterRuntime?: string;
   searchLocation: string;
   sourceBefore: {
     adzuna: number;
@@ -186,6 +187,7 @@ export function applySearchLocationFilter<T extends Job>(
   const isSearchActive = cleanSearchLocation.length > 0;
 
   const metrics: LocationFilterMetrics = {
+    locationFilterRuntime: 'LOCATION-FILTER-V2',
     searchLocation: cleanSearchLocation || '(Nenhum - Todas as Regiões)',
     sourceBefore: { adzuna: 0, greenhouse: 0, other: 0, total: 0 },
     matchedLocal: { adzuna: 0, greenhouse: 0, other: 0, total: 0 },

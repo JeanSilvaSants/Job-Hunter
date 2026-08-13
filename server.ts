@@ -134,6 +134,7 @@ async function startServer() {
 
         return {
           ok: false,
+          runtimeBackend: 'ADZUNA-BACKEND-V2',
           clientEndpoint,
           backendHandler,
           credentialsStatus,
@@ -162,6 +163,7 @@ async function startServer() {
       } catch (parseErr: any) {
         return {
           ok: false,
+          runtimeBackend: 'ADZUNA-BACKEND-V2',
           clientEndpoint,
           backendHandler,
           credentialsStatus,
@@ -195,6 +197,7 @@ async function startServer() {
 
       return {
         ok: true,
+        runtimeBackend: 'ADZUNA-BACKEND-V2',
         clientEndpoint,
         backendHandler,
         credentialsStatus,
@@ -219,6 +222,7 @@ async function startServer() {
       console.error('Network/Server Exception querying Adzuna:', err);
       return {
         ok: false,
+        runtimeBackend: 'ADZUNA-BACKEND-V2',
         clientEndpoint,
         backendHandler,
         credentialsStatus,

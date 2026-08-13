@@ -462,8 +462,11 @@ export default function App() {
                   <Globe className="w-4 h-4" />
                 </div>
                 <div>
-                  <h2 className="text-xs font-bold text-slate-900 flex items-center gap-2">
-                    Busca de Vagas Reais em Tempo Real (Adzuna + Greenhouse)
+                  <h2 className="text-xs font-bold text-slate-900 flex items-center gap-2 flex-wrap">
+                    <span>Busca de Vagas Reais em Tempo Real (Adzuna + Greenhouse)</span>
+                    <span className="px-2 py-0.5 rounded text-[10px] font-black tracking-wider bg-amber-400 text-slate-950 uppercase border border-amber-500 font-mono shadow-2xs">
+                      RUNTIME BUILD: LOCATION-FILTER-V2
+                    </span>
                   </h2>
                   <p className="text-[11px] text-slate-500 font-medium">
                     Consulte vagas públicas agregadas no Brasil e Job Boards oficiais com filtro de elegibilidade geográfica.
@@ -724,16 +727,21 @@ export default function App() {
                 </label>
               </div>
 
-              {diagnostics && (
-                <button
-                  onClick={() => setShowDebug(!showDebug)}
-                  className="text-[11px] text-slate-500 hover:text-slate-800 font-mono font-semibold flex items-center gap-1 cursor-pointer shrink-0"
-                >
-                  <Terminal className="w-3 h-3 text-slate-400" />
-                  <span>Debug Metrics</span>
-                  {showDebug ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
-                </button>
-              )}
+              <div className="flex items-center gap-2 shrink-0">
+                <span className="px-2 py-0.5 rounded text-[10px] font-black tracking-wider bg-amber-400 text-slate-950 uppercase border border-amber-500 font-mono shadow-2xs">
+                  RUNTIME BUILD: LOCATION-FILTER-V2
+                </span>
+                {diagnostics && (
+                  <button
+                    onClick={() => setShowDebug(!showDebug)}
+                    className="text-[11px] text-slate-500 hover:text-slate-800 font-mono font-semibold flex items-center gap-1 cursor-pointer shrink-0"
+                  >
+                    <Terminal className="w-3 h-3 text-slate-400" />
+                    <span>Debug Metrics</span>
+                    {showDebug ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                  </button>
+                )}
+              </div>
             </div>
 
             {/* Active Geographic Filter Status Banner */}
@@ -793,14 +801,24 @@ export default function App() {
             {/* Debug Mode Panel */}
             {showDebug && diagnostics && (
               <div className="bg-slate-950 text-slate-200 p-4 rounded-lg font-mono text-[11px] space-y-4 border border-slate-800 shadow-lg">
-                <div className="text-slate-400 font-bold uppercase tracking-wider text-[11px] flex items-center justify-between border-b border-slate-800 pb-2.5">
-                  <span className="flex items-center gap-1.5 text-indigo-400">
-                    <Terminal className="w-4 h-4" />
-                    Diagnóstico Completo de Execução Multi-Fonte (Adzuna + Greenhouse)
-                  </span>
-                  <span className="text-slate-400 font-medium">
-                    Latência Total: <strong className="text-white">{diagnostics.latencyMs} ms</strong>
-                  </span>
+                <div className="text-slate-400 font-bold uppercase tracking-wider text-[11px] flex flex-wrap items-center justify-between border-b border-slate-800 pb-2.5 gap-2">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="flex items-center gap-1.5 text-indigo-400">
+                      <Terminal className="w-4 h-4" />
+                      Diagnóstico Completo de Execução Multi-Fonte (Adzuna + Greenhouse)
+                    </span>
+                    <span className="px-2 py-0.5 rounded text-[10px] font-black tracking-wider bg-amber-400 text-slate-950 uppercase border border-amber-500 font-mono">
+                      RUNTIME BUILD: LOCATION-FILTER-V2
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-3 flex-wrap">
+                    <span className="text-[10px] text-purple-300 font-bold bg-purple-950/80 border border-purple-800 px-2 py-0.5 rounded font-mono">
+                      SEARCH HANDLER: {diagnostics.runtimeSearchHandler || 'SEARCH-HANDLER-V2'}
+                    </span>
+                    <span className="text-slate-400 font-medium">
+                      Latência Total: <strong className="text-white">{diagnostics.latencyMs} ms</strong>
+                    </span>
+                  </div>
                 </div>
 
                 {/* Section 1: ADZUNA REQUEST DEBUG */}
@@ -824,6 +842,12 @@ export default function App() {
 
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-slate-300">
                     <div>
+                      <span className="text-slate-500 block text-[10px]">ADZUNA BACKEND RUNTIME:</span>
+                      <strong className="text-amber-400 font-mono font-bold">
+                        {diagnostics.runtimeBackend || diagnostics.adzuna?.runtimeBackend || 'ADZUNA-BACKEND-V2'}
+                      </strong>
+                    </div>
+                    <div>
                       <span className="text-slate-500 block text-[10px]">CLIENT ENDPOINT:</span>
                       <strong className="text-white font-mono">{diagnostics.clientEndpoint || diagnostics.adzuna?.clientEndpoint || '/api/adzuna/search'}</strong>
                     </div>
@@ -835,11 +859,11 @@ export default function App() {
                       <span className="text-slate-500 block text-[10px]">COUNTRY / MERCADO:</span>
                       <strong className="text-white uppercase">{diagnostics.countryCode || 'BR'}</strong>
                     </div>
+
                     <div>
                       <span className="text-slate-500 block text-[10px]">SEARCH LOCATION:</span>
                       <strong className="text-white">{diagnostics.location || '—'}</strong>
                     </div>
-
                     <div>
                       <span className="text-slate-500 block text-[10px]">QUERY:</span>
                       <strong className="text-white">{diagnostics.query || '—'}</strong>
@@ -854,14 +878,14 @@ export default function App() {
                         {diagnostics.adzunaHttpStatus !== null && diagnostics.adzunaHttpStatus !== undefined ? diagnostics.adzunaHttpStatus : (diagnostics.statusCategory === 'SUCCESS_WITH_RESULTS' ? '200' : '—')}
                       </strong>
                     </div>
+
                     <div>
                       <span className="text-slate-500 block text-[10px]">ERROR STAGE:</span>
                       <strong className={diagnostics.errorStage || diagnostics.adzuna?.errorStage ? 'text-rose-400' : 'text-emerald-400'}>
                         {diagnostics.errorStage || diagnostics.adzuna?.errorStage || 'NONE'}
                       </strong>
                     </div>
-
-                    <div className="col-span-2">
+                    <div>
                       <span className="text-slate-500 block text-[10px]">ERROR CODE:</span>
                       <strong className={diagnostics.statusCategory.includes('ERROR') || diagnostics.statusCategory.includes('MISSING') ? 'text-rose-400' : 'text-emerald-400'}>
                         {diagnostics.statusCategory}
@@ -918,15 +942,15 @@ export default function App() {
                 {diagnostics.locationFilter && (
                   <div className="bg-slate-900/90 border border-slate-800 rounded-md p-3 space-y-2">
                     <div className="flex flex-wrap items-center justify-between border-b border-slate-800/80 pb-1.5 gap-1">
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 flex-wrap">
                         <span className="text-amber-400 font-bold text-[11px] tracking-wide block uppercase">
                           LOCATION FILTER BREAKDOWN
                         </span>
-                        <span className="text-[10px] text-emerald-300 font-bold bg-emerald-950/70 border border-emerald-800 px-1.5 py-0.2 rounded">
-                          LOCATION FILTER ENGINE: ACTIVE
+                        <span className="text-[10px] text-amber-400 font-bold bg-amber-950/80 border border-amber-800 px-1.5 py-0.2 rounded font-mono">
+                          LOCATION FILTER RUNTIME: {diagnostics.locationFilterRuntime || diagnostics.locationFilter?.locationFilterRuntime || 'LOCATION-FILTER-V2'}
                         </span>
-                        <span className="text-[10px] text-indigo-300 font-bold bg-indigo-950/70 border border-indigo-800 px-1.5 py-0.2 rounded">
-                          LOCATION FILTER VERSION: v1
+                        <span className="text-[10px] text-emerald-300 font-bold bg-emerald-950/70 border border-emerald-800 px-1.5 py-0.2 rounded">
+                          ENGINE: ACTIVE
                         </span>
                       </div>
                       <span className="text-[10px] text-amber-300 font-bold bg-amber-950/70 border border-amber-800 px-2 py-0.5 rounded">
