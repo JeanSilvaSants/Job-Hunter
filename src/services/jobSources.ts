@@ -32,10 +32,20 @@ export interface AdzunaRawItem {
   contract_time?: string;
 }
 
+export interface AdzunaRouteCheck {
+  requestMethod: string;
+  requestPath: string;
+  backendReached: boolean;
+  responseContentType: string;
+  backendHttpStatus: number;
+  adzunaHttpStatus?: number | null;
+}
+
 export interface DiagnosticsDetails {
   runtimeBackend?: string;
   runtimeSearchHandler?: string;
   locationFilterRuntime?: string;
+  routeCheck?: AdzunaRouteCheck;
   adzuna?: {
     runtimeBackend?: string;
     clientEndpoint?: string;
@@ -47,6 +57,7 @@ export interface DiagnosticsDetails {
     errorStage?: 'REQUEST' | 'BACKEND_PROXY' | 'ADZUNA_API' | 'RESPONSE_PARSE' | 'NORMALIZATION' | null;
     adzunaHttpStatus?: number | null;
     httpStatus?: number;
+    routeCheck?: AdzunaRouteCheck;
   };
   greenhouse: {
     boardsChecked: number;
@@ -301,10 +312,14 @@ export async function fetchAdzunaRaw(
   data?: any;
   error?: string;
   errorStage?: 'REQUEST' | 'BACKEND_PROXY' | 'ADZUNA_API' | 'RESPONSE_PARSE' | 'NORMALIZATION' | null;
+  routeCheck?: AdzunaRouteCheck;
 }> {
+  const requestMethod = 'POST';
+  const requestPath = '/api/adzuna/search';
+
   try {
-    const res = await fetch('/api/adzuna/search', {
-      method: 'POST',
+    const res = await fetch(requestPath, {
+      method: requestMethod,
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         query,
@@ -314,13 +329,24 @@ export async function fetchAdzunaRaw(
       }),
     });
 
+    const contentType = res.headers.get('content-type') || 'application/json';
+
     let rawText = '';
     try {
       rawText = await res.text();
     } catch (readErr: any) {
+      const routeCheck: AdzunaRouteCheck = {
+        requestMethod,
+        requestPath,
+        backendReached: true,
+        responseContentType: contentType,
+        backendHttpStatus: res.status,
+        adzunaHttpStatus: null,
+      };
       return {
         ok: false,
         errorStage: 'REQUEST',
+        routeCheck,
         error: `Falha ao ler resposta do backend (${res.status}): ${readErr.message || 'Stream error'}`,
         data: {
           ok: false,
@@ -341,9 +367,18 @@ export async function fetchAdzunaRaw(
       data = JSON.parse(rawText);
     } catch (parseErr: any) {
       const sanitizedSnippet = rawText.substring(0, 120).replace(/<[^>]*>?/gm, '').trim();
+      const routeCheck: AdzunaRouteCheck = {
+        requestMethod,
+        requestPath,
+        backendReached: true,
+        responseContentType: contentType,
+        backendHttpStatus: res.status,
+        adzunaHttpStatus: null,
+      };
       return {
         ok: false,
         errorStage: 'RESPONSE_PARSE',
+        routeCheck,
         error: `Backend retornou resposta não-JSON (HTTP ${res.status}): ${sanitizedSnippet || 'Erro de formato'}`,
         data: {
           ok: false,
@@ -359,20 +394,39 @@ export async function fetchAdzunaRaw(
       };
     }
 
+    const routeCheck: AdzunaRouteCheck = {
+      requestMethod,
+      requestPath,
+      backendReached: true,
+      responseContentType: contentType,
+      backendHttpStatus: data?.httpStatus || res.status,
+      adzunaHttpStatus: data?.adzunaHttpStatus ?? (data?.ok ? 200 : null),
+    };
+
     if (!data.ok) {
       return {
         ok: false,
         errorStage: data.errorStage || (data.statusCategory === 'MISSING_CREDENTIALS' ? 'BACKEND_PROXY' : 'ADZUNA_API'),
         data,
+        routeCheck,
         error: data.adzunaError || data.message || `Erro na API (${data.statusCategory || data.httpStatus})`,
       };
     }
 
-    return { ok: true, results: data.results || [], data };
+    return { ok: true, results: data.results || [], data, routeCheck };
   } catch (err: any) {
+    const routeCheck: AdzunaRouteCheck = {
+      requestMethod,
+      requestPath,
+      backendReached: false,
+      responseContentType: 'none (network error)',
+      backendHttpStatus: 0,
+      adzunaHttpStatus: null,
+    };
     return {
       ok: false,
       errorStage: 'REQUEST',
+      routeCheck,
       error: `Não foi possível conectar ao servidor backend: ${err.message || 'Erro de rede'}`,
       data: {
         ok: false,
@@ -407,6 +461,7 @@ export async function searchRealJobs(
   let adzunaApiError: string | undefined;
   let adzunaErrorStage: 'REQUEST' | 'BACKEND_PROXY' | 'ADZUNA_API' | 'RESPONSE_PARSE' | 'NORMALIZATION' | null = null;
   let backendData: any = null;
+  let adzunaRouteCheck: AdzunaRouteCheck | undefined = undefined;
 
   // 1. Fetch Adzuna Jobs (if sourceFilter is 'all' or 'adzuna')
   if (sourceFilter === 'all' || sourceFilter === 'adzuna') {
@@ -418,6 +473,7 @@ export async function searchRealJobs(
 
       for (const res of results) {
         if (res.data) backendData = res.data;
+        if (res.routeCheck) adzunaRouteCheck = res.routeCheck;
         if (res.ok && res.results) {
           adzunaRawItems.push(...res.results);
         } else if (!adzunaApiError && res.error) {
@@ -429,6 +485,7 @@ export async function searchRealJobs(
       const query = options.query || 'Customer Success';
       const res = await fetchAdzunaRaw(query, location, daysOld, country);
       if (res.data) backendData = res.data;
+      if (res.routeCheck) adzunaRouteCheck = res.routeCheck;
       if (res.ok && res.results) {
         adzunaRawItems = res.results;
       } else {
@@ -571,6 +628,7 @@ export async function searchRealJobs(
     finalCount: jobsWithAnalysis.length,
     latencyMs,
     adzunaError: backendData?.adzunaError || adzunaApiError || null,
+    routeCheck: adzunaRouteCheck,
 
     // Expanded Multi-Source Diagnostics
     adzuna: {
@@ -584,6 +642,7 @@ export async function searchRealJobs(
       errorStage: backendData?.errorStage || adzunaErrorStage,
       adzunaHttpStatus: backendData?.adzunaHttpStatus ?? null,
       httpStatus: backendData?.httpStatus || 200,
+      routeCheck: adzunaRouteCheck,
     },
     greenhouse: {
       boardsChecked: ghBoardsChecked,

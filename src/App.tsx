@@ -840,6 +840,48 @@ export default function App() {
                     </div>
                   </div>
 
+                  {/* Sub-block: ADZUNA ROUTE CHECK */}
+                  <div className="bg-slate-950/80 p-2.5 rounded border border-slate-800 space-y-2">
+                    <div className="flex items-center justify-between border-b border-slate-800/80 pb-1">
+                      <span className="text-cyan-400 font-bold text-[10px] tracking-wider uppercase flex items-center gap-1.5">
+                        <Terminal className="w-3 h-3" />
+                        ADZUNA ROUTE CHECK
+                      </span>
+                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${
+                        (diagnostics.routeCheck?.backendReached ?? (diagnostics.statusCategory !== 'NETWORK_ERROR'))
+                          ? 'bg-emerald-950/80 text-emerald-300 border-emerald-800'
+                          : 'bg-rose-950/80 text-rose-300 border-rose-800'
+                      }`}>
+                        BACKEND REACHED: {(diagnostics.routeCheck?.backendReached ?? (diagnostics.statusCategory !== 'NETWORK_ERROR')) ? 'YES' : 'NO'}
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[10px]">
+                      <div>
+                        <span className="text-slate-500 block">REQUEST METHOD:</span>
+                        <strong className="text-white font-mono">{diagnostics.routeCheck?.requestMethod || 'POST'}</strong>
+                      </div>
+                      <div>
+                        <span className="text-slate-500 block">REQUEST PATH:</span>
+                        <strong className="text-white font-mono">{diagnostics.routeCheck?.requestPath || '/api/adzuna/search'}</strong>
+                      </div>
+                      <div>
+                        <span className="text-slate-500 block">RESPONSE CONTENT TYPE:</span>
+                        <strong className="text-cyan-300 font-mono">{diagnostics.routeCheck?.responseContentType || 'application/json'}</strong>
+                      </div>
+                      <div>
+                        <span className="text-slate-500 block">BACKEND HTTP / ADZUNA HTTP:</span>
+                        <strong className="text-emerald-400 font-mono">
+                          {diagnostics.routeCheck?.backendHttpStatus || diagnostics.httpStatus || 200}
+                        </strong>
+                        <span className="text-slate-500"> / </span>
+                        <strong className="text-emerald-400 font-mono">
+                          {diagnostics.adzunaHttpStatus !== null && diagnostics.adzunaHttpStatus !== undefined ? diagnostics.adzunaHttpStatus : (diagnostics.statusCategory === 'SUCCESS_WITH_RESULTS' || diagnostics.httpStatus === 200 ? '200' : '—')}
+                        </strong>
+                      </div>
+                    </div>
+                  </div>
+
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-slate-300">
                     <div>
                       <span className="text-slate-500 block text-[10px]">ADZUNA BACKEND RUNTIME:</span>

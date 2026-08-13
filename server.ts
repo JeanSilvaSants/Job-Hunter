@@ -10,6 +10,13 @@ async function startServer() {
   const PORT = 3000;
 
   app.use(express.json());
+  app.use(express.urlencoded({ extended: true }));
+
+  // Ensure all /api responses default to application/json
+  app.use('/api', (req, res, next) => {
+    res.setHeader('Content-Type', 'application/json');
+    next();
+  });
 
   // Helper function to query Adzuna safely with full diagnostics
   async function queryAdzuna(options: {
@@ -246,26 +253,61 @@ async function startServer() {
     }
   }
 
-  // API Route: Secure Adzuna Proxy
-  app.post('/api/adzuna/search', async (req, res) => {
-    const { query, location, daysOld, country, page } = req.body || {};
-    const result = await queryAdzuna({ query, location, daysOld, country, page });
-    return res.json(result);
-  });
+  // API Route: Secure Adzuna Proxy (supports POST, GET, with or without trailing slash)
+  const handleAdzunaSearch = async (req: express.Request, res: express.Response) => {
+    try {
+      const query = (req.body?.query ?? req.query?.query) as string | undefined;
+      const location = (req.body?.location ?? req.query?.location) as string | undefined;
+      const daysOld = Number(req.body?.daysOld ?? req.query?.daysOld ?? req.body?.days ?? req.query?.days ?? 30);
+      const country = (req.body?.country ?? req.query?.country ?? 'br') as string;
+      const page = Number(req.body?.page ?? req.query?.page ?? 1);
+      const resultsPerPage = Number(req.body?.resultsPerPage ?? req.query?.resultsPerPage ?? req.body?.limit ?? req.query?.limit ?? 50);
+
+      const result = await queryAdzuna({ query, location, daysOld, country, page, resultsPerPage });
+      return res.status(result.httpStatus || 200).json(result);
+    } catch (routeErr: any) {
+      return res.status(500).json({
+        ok: false,
+        runtimeBackend: 'ADZUNA-BACKEND-V2',
+        clientEndpoint: '/api/adzuna/search',
+        backendHandler: 'server.ts:queryAdzuna',
+        errorStage: 'BACKEND_PROXY',
+        statusCategory: 'SERVER_EXCEPTION',
+        httpStatus: 500,
+        adzunaHttpStatus: null,
+        statusText: 'Internal Server Error',
+        adzunaError: routeErr.message || 'Erro inesperado no servidor proxy Adzuna',
+        results: [],
+      });
+    }
+  };
+
+  app.post('/api/adzuna/search', handleAdzunaSearch);
+  app.post('/api/adzuna/search/', handleAdzunaSearch);
+  app.get('/api/adzuna/search', handleAdzunaSearch);
+  app.get('/api/adzuna/search/', handleAdzunaSearch);
 
   // Minimal Test Diagnostic Endpoint
   app.get('/api/adzuna/test', async (req, res) => {
-    const testResult = await queryAdzuna({
-      query: 'customer',
-      location: '', // Omit location
-      daysOld: 30,
-      resultsPerPage: 10,
-      page: 1,
-    });
-    return res.json({
-      testName: 'Minimal Diagnostic Test (Query: customer, Location: none, Days: 30, Limit: 10)',
-      result: testResult,
-    });
+    try {
+      const testResult = await queryAdzuna({
+        query: 'customer',
+        location: '', // Omit location
+        daysOld: 30,
+        resultsPerPage: 10,
+        page: 1,
+      });
+      return res.json({
+        testName: 'Minimal Diagnostic Test (Query: customer, Location: none, Days: 30, Limit: 10)',
+        result: testResult,
+      });
+    } catch (testErr: any) {
+      return res.status(500).json({
+        ok: false,
+        runtimeBackend: 'ADZUNA-BACKEND-V2',
+        error: testErr.message || 'Erro no endpoint de teste Adzuna',
+      });
+    }
   });
 
   // Public Configuration Endpoint (Supabase Frontend Credentials Only)
@@ -291,7 +333,19 @@ async function startServer() {
   app.get('/api/health', (req, res) => {
     res.json({
       status: 'ok',
+      runtimeBackend: 'ADZUNA-BACKEND-V2',
       hasAdzunaCredentials: Boolean(process.env.ADZUNA_APP_ID && process.env.ADZUNA_APP_KEY),
+    });
+  });
+
+  // API 404 Fallback: guarantees any unmatched /api/* route returns JSON instead of falling through to HTML
+  app.all('/api/*', (req, res) => {
+    res.status(404).json({
+      ok: false,
+      runtimeBackend: 'ADZUNA-BACKEND-V2',
+      error: `Endpoint '${req.originalUrl}' não encontrado na API.`,
+      statusCategory: 'ROUTE_NOT_FOUND',
+      httpStatus: 404,
     });
   });
 
